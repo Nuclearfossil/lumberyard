@@ -268,7 +268,7 @@ namespace AzFramework
 
         if (itr != m_registry->m_assetDependencies.end())
         {
-            AZStd::vector<ProductDependency> assetDependencyList = itr->second;
+            AZStd::vector<ProductDependency>& assetDependencyList = itr->second;
 
             for (const ProductDependency& dependency : assetDependencyList)
             {
@@ -377,13 +377,15 @@ namespace AzFramework
         if (!bytes.empty())
         {
             AZ::IO::MemoryStream catalogStream(bytes.data(), bytes.size());
-            AZ::Utils::LoadObjectFromStreamInPlace<AzFramework::AssetRegistry>(catalogStream, *m_registry.get(), serializeContext);
+            AZ::Utils::LoadObjectFromStreamInPlace<AzFramework::AssetRegistry>(catalogStream, *m_registry.get(), serializeContext, AZ::ObjectStream::FilterDescriptor(&AZ::Data::AssetFilterNoAssetLoading));
 
             AZ_TracePrintf("AssetCatalog",
                 "\n========================================================\n"
                 "Loaded registry containing %u assets.\n"
                 "========================================================\n",
                 m_registry->m_assetIdToInfo.size());
+
+            AssetCatalogEventBus::Broadcast(&AssetCatalogEventBus::Events::OnCatalogLoaded, catalogRegistryFile);
         }
         else
         {

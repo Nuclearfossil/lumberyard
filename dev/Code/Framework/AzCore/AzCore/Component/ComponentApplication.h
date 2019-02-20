@@ -142,8 +142,8 @@ namespace AZ
             /// Whether or not to load dynamic modules described by \ref Descriptor::m_modules
             bool m_loadDynamicModules = true;
 
-            /// Specifies which system components to create & activate. If no tags specified, all system components are used.
-            AZStd::vector<AZ::Crc32, OSStdAllocator> m_systemComponentTags;
+            /// Specifies which system components to create & activate. If no tags specified, all system components are used. Specify as comma separated list.
+            const char* m_systemComponentTags = nullptr;
         };
 
         ComponentApplication();
@@ -183,7 +183,7 @@ namespace AZ
         /// It's expected that derived applications will implement an application root.
         const char*  GetAppRoot() override { return ""; }
         /// Returns the path to the folder the executable is in.
-        const char* GetExecutableFolder() override { return m_exeDirectory; }
+        const char* GetExecutableFolder() const override { return m_exeDirectory; }
         /// Returns pointer to the driller manager if it's enabled, otherwise NULL.
         Debug::DrillerManager* GetDrillerManager() override { return m_drillerManager; }
         //////////////////////////////////////////////////////////////////////////
@@ -203,7 +203,7 @@ namespace AZ
 
         /**
         * Ticks all using the \ref AZ::SystemTickBus at all times. Should always tick even if the application is not active.
-        */        
+        */
         virtual void TickSystem();
 
         /**
@@ -235,6 +235,8 @@ namespace AZ
 
         /// Perform any additional initialization needed before loading modules
         virtual void PreModuleLoad() {};
+
+        virtual void CreateStaticModules(AZStd::vector<AZ::Module*>& outModules);
 
         /// Common logic shared between the multiple Create(...) functions.
         void        CreateCommon();
@@ -302,7 +304,7 @@ namespace AZ
         bool                                        m_isStarted;
         bool                                        m_isSystemAllocatorOwner;
         bool                                        m_isOSAllocatorOwner;
-        void*                                       m_memoryBlock;                  ///< Pointer to the memory block allocator, so we can free it OnDestroy.
+        void*                                       m_fixedMemoryBlock;                  ///< Pointer to the memory block allocator, so we can free it OnDestroy.
         IAllocatorAllocate*                         m_osAllocator;
         EntitySetType                               m_entities;
         char                                        m_exeDirectory[AZ_MAX_PATH_LEN];

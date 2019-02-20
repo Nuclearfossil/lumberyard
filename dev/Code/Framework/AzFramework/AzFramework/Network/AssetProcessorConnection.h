@@ -80,8 +80,10 @@ namespace AzFramework
 
             //////////////////////////////////////////////////////////////////////////
             // AzFramework::SocketConnection overrides
-            bool Connect(const char* address, AZ::u16 port) override; //disconnects any current connection and starts to reconnect to the input params 
-            bool Disconnect() override; //disconnects any current connection and stop any retrying to connect
+            bool Connect(const char* address, AZ::u16 port) override; //disconnects any current connection and starts to reconnect to the input params
+            // (Async) disconnects any current connection and stop any retrying to connect.
+            // if completeDisconnect is true, will wait until the connection has been terminated before returning.
+            bool Disconnect(bool completeDisconnect = false) override; 
             bool Listen(AZ::u16 port) override; //disconnects any current connection and starts to listen for a connection
             EConnectionState GetConnectionState() const override;
             bool IsConnected() const override;
@@ -286,7 +288,8 @@ namespace AzFramework
                     }
 
                     bool deserialized = UnpackMessage(responseBuffer, response);
-                    AZ_Assert(deserialized, "AssetProcessor::SendRequest: failed to deserialize");
+                    // because the response comes from a potentially unknown source, we are not going to assert simply becuase it was not unpackable.
+                    AZ_Warning("AssetProcessorConnection", deserialized, "Unable to deserialize the response from the remote connection (for request/response %s, %s)", request.RTTI_GetTypeName(), response.RTTI_GetTypeName());
                     return deserialized;
                 }
             }

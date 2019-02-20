@@ -22,7 +22,6 @@
 #if defined(LINUX) || defined(APPLE)
   #include <platform.h>
 #endif
-#include <CryEngineAPI.h>
 
 #include "smartptr.h"
 #include <IFlares.h> // <> required for Interfuscator
@@ -61,7 +60,7 @@ struct IAnimNode;
 struct SSkinningData;
 struct SSTexSamplerFX;
 struct SShaderTextureSlot;
-
+struct IRenderElement;
 
 namespace AZ
 {
@@ -212,10 +211,10 @@ union UParamVal
 //   if you don't like it, please write a substitute for all string within the project and use them everywhere.
 struct SShaderParam
 {
-    char m_Name[32];
-    EParamType m_Type;
+    AZStd::string m_Name;
+    AZStd::string m_Script;
     UParamVal m_Value;
-    string m_Script;
+    EParamType m_Type;
     uint8 m_eSemantic;
 
     inline void Construct()
@@ -223,7 +222,8 @@ struct SShaderParam
         memset(&m_Value, 0, sizeof(m_Value));
         m_Type = eType_UNKNOWN;
         m_eSemantic = 0;
-        m_Name[0] = 0;
+        m_Name.clear();
+        m_Script.clear();
     }
     inline SShaderParam()
     {
@@ -261,7 +261,7 @@ struct SShaderParam
     }
     inline SShaderParam (const SShaderParam& src)
     {
-        memcpy(m_Name, src.m_Name, sizeof(m_Name));
+        m_Name = src.m_Name;
         m_Script = src.m_Script;
         m_Type = src.m_Type;
         m_eSemantic = src.m_eSemantic;
@@ -293,7 +293,7 @@ struct SShaderParam
             {
                 continue;
             }
-            if (!azstricmp(sp->m_Name, name))
+            if (sp->m_Name == name)
             {
                 if (sp->m_Type == eType_STRING)
                 {
@@ -632,33 +632,22 @@ struct SDeformInfo
 {
     EDeformType m_eType;
     SWaveForm2 m_WaveX;
-    SWaveForm2 m_WaveY;
-    SWaveForm2 m_WaveZ;
-    SWaveForm2 m_WaveW;
     float m_fDividerX;
-    float m_fDividerY;
-    float m_fDividerZ;
-    float m_fDividerW;
     Vec3 m_vNoiseScale;
 
     SDeformInfo()
     {
         m_eType = eDT_Unknown;
         m_fDividerX = 0.01f;
-        m_fDividerY = 0.01f;
-        m_fDividerZ = 0.01f;
-        m_fDividerW = 0.01f;
         m_vNoiseScale = Vec3(1, 1, 1);
     }
 
     inline bool operator == (const SDeformInfo& m)
     {
         if (m_eType == m.m_eType &&
-            m_WaveX == m.m_WaveX && m_WaveY == m.m_WaveY &&
-            m_WaveZ == m.m_WaveZ && m_WaveW == m.m_WaveW &&
+            m_WaveX == m.m_WaveX &&
             m_vNoiseScale == m.m_vNoiseScale &&
-            m_fDividerX != m.m_fDividerX && m_fDividerY != m.m_fDividerY &&
-            m_fDividerZ != m.m_fDividerZ && m_fDividerW != m.m_fDividerW)
+            m_fDividerX == m.m_fDividerX)
         {
             return true;
         }
@@ -783,7 +772,7 @@ struct SRenderObjData
 {
     uintptr_t m_uniqueObjectId;
 
-    CRendElementBase* m_pRE;
+    IRenderElement* m_pRE;
     SSkinningData* m_pSkinningData;
     TArray<Vec4>    m_Constants;
 
@@ -852,6 +841,7 @@ struct SRenderObjData
         m_pBending = nullptr;
         m_BendingPrev = nullptr;
         m_pShaderParams = nullptr;
+        m_FogVolumeContribIdx[0] = m_FogVolumeContribIdx[1] = static_cast<uint16>(-1);
 
         // The following should be changed to be something like 0xac to indicate invalid data so that by default 
         // data that was not set will break render features and will be traced (otherwise, default 0 just might pass)
@@ -861,6 +851,11 @@ struct SRenderObjData
     void SetShaderParams(const DynArray<SShaderParam>* pShaderParams)
     {
         m_pShaderParams = pShaderParams;
+    }
+
+    void SetRenderElement(IRenderElement* renderElement)
+    {
+        m_pRE = renderElement;
     }
 
     void GetMemoryUsage(ICrySizer* pSizer) const
@@ -889,6 +884,8 @@ struct ShadowMapFrustum;
 _MS_ALIGN(16) class CRenderObject
 {
 public:
+    AZ_CLASS_ALLOCATOR(CRenderObject, AZ::LegacyAllocator, 0);
+
     struct SInstanceInfo
     {
         Matrix34 m_Matrix;
@@ -951,13 +948,14 @@ public:
 
     IRenderNode*                m_pRenderNode;            //!< Will define instance id.
     _smart_ptr<IMaterial>       m_pCurrMaterial;          //!< Parent material used for render object.
-    CRendElementBase*           m_pRE;                    //!< RenderElement used by this CRenderObject
+    IRenderElement*             m_pRE;                    //!< RenderElement used by this CRenderObject
 
     PerInstanceConstantBufferKey m_PerInstanceConstantBufferKey;
 
     // Common flags
     uint32                     m_bWasDeleted : 1; //!< Object was deleted and in unusable state
     uint32                     m_bHasShadowCasters : 1; //!< Has non-empty list of lights casting shadows in render object data
+    uint32                     m_NoDecalReceiver : 1;
 
     //! Embedded SRenderObjData, optional data carried by CRenderObject
     SRenderObjData             m_data;
@@ -1014,7 +1012,7 @@ public:
         m_pNextSubObject = NULL;
         m_bWasDeleted = false;
         m_bHasShadowCasters = false;
-
+        m_NoDecalReceiver = false;
         m_data.Init();
     }
     void AssignId(uint32 id) { m_Id = id; }
@@ -1026,7 +1024,8 @@ public:
         return &m_data;
     }
 
-    ILINE CRendElementBase* GetRE() const { return m_pRE; }
+    IRenderElement* GetRE() { return m_pRE; }
+    void SetRE(IRenderElement* re) { m_pRE = re; }
 
 protected:
     // Next child sub object used for permanent objects
@@ -1056,6 +1055,7 @@ enum EResClassName
 // className: CTexture, CHWShader_VS, CHWShader_PS, CShader
 struct SResourceAsync
 {
+    AZ_CLASS_ALLOCATOR(SResourceAsync, AZ::LegacyAllocator, 0);
     int nReady;          // 0: Not ready; 1: Ready; -1: Error
     byte* pData;
     EResClassName eClassName;     // Resource class name
@@ -1195,6 +1195,7 @@ enum ETexGenType
 
 struct SEfTexModificator
 {
+    AZ_CLASS_ALLOCATOR(SEfTexModificator, AZ::LegacyAllocator, 0);
     bool SetMember(const char* szParamName, float fValue)
     {
         CASE_TEXMODBYTE(m_eTGType);
@@ -1409,8 +1410,8 @@ struct STexState
         m_bPAD = 0;
     }
 
-    ENGINE_API void Destroy();
-    ENGINE_API void Init(const STexState& src);
+    void Destroy();
+    void Init(const STexState& src);
 
     ~STexState() { Destroy(); }
     STexState(const STexState& src) { Init(src); }
@@ -1431,11 +1432,11 @@ struct STexState
         delete this;
     }
 
-    ENGINE_API bool SetFilterMode(int nFilter);
-    ENGINE_API bool SetClampMode(int nAddressU, int nAddressV, int nAddressW);
-    ENGINE_API void SetBorderColor(DWORD dwColor);
-    ENGINE_API void SetComparisonFilter(bool bEnable);
-    ENGINE_API void PostCreate();
+    bool SetFilterMode(int nFilter);
+    bool SetClampMode(int nAddressU, int nAddressV, int nAddressW);
+    void SetBorderColor(DWORD dwColor);
+    void SetComparisonFilter(bool bEnable);
+    void PostCreate();
 };
 
 
@@ -1770,7 +1771,7 @@ struct SEfResTexture
     STexSamplerRT       m_Sampler;
     SEfResTextureExt    m_Ext;
 
-    void UpdateForCreate();
+    void UpdateForCreate(int nTSlot);
     void Update(int nTSlot);
     void UpdateWithModifier(int nTSlot);
 
@@ -2504,6 +2505,7 @@ enum ERenderListID
     EFSLIST_EYE_OVERLAY,                         // Eye overlay layer requires special processing
     EFSLIST_FOG_VOLUME,                          // Fog density injection passes.
     EFSLIST_GPU_PARTICLE_CUBEMAP_COLLISION,       // Cubemaps for GPU particle cubemap depth collision
+    EFSLIST_REFRACTIVE_SURFACE,                   // After decals, used for instance for the water surface that comes with water volumes.
 
     EFSLIST_NUM
 };
@@ -2646,6 +2648,12 @@ public:
     virtual bool FXSetCSFloat(const CCryNameR& NameParam, const Vec4 fParams[], int nParams) = 0;
     virtual bool FXSetVSFloat(const CCryNameR& NameParam, const Vec4 fParams[], int nParams) = 0;
     virtual bool FXSetGSFloat(const CCryNameR& NameParam, const Vec4 fParams[], int nParams) = 0;
+
+    virtual bool FXSetPSFloat(const char* NameParam, const Vec4 fParams[], int nParams) = 0;
+    virtual bool FXSetCSFloat(const char* NameParam, const Vec4 fParams[], int nParams) = 0;
+    virtual bool FXSetVSFloat(const char* NameParam, const Vec4 fParams[], int nParams) = 0;
+    virtual bool FXSetGSFloat(const char* NameParam, const Vec4 fParams[], int nParams) = 0;
+
     virtual bool FXBegin(uint32* uiPassCount, uint32 nFlags) = 0;
     virtual bool FXBeginPass(uint32 uiPass) = 0;
     virtual bool FXCommit(const uint32 nFlags) = 0;
@@ -3040,6 +3048,11 @@ struct SRenderLight
         return ((float) m_nAttenFalloffMax) / 255.0f;
     }
 
+    // Calculate the scissor rectangle in screenspace that encompasses this light.  These values are used to set
+    // the hardware scissor rect in order to clip the min/max 2d extents for the light.
+    // These values must be calculated and read on the render thread due to the VR tracking updates performed on the render thread.
+    void CalculateScissorRect();
+
     //=========================================================================================================================
 
     // Commonly used on most code paths (64 bytes)
@@ -3312,12 +3325,14 @@ struct SDeferredDecal
     {
         ZeroStruct(*this);
         rectTexture.w = rectTexture.h = 1.f;
+        angleAttenuation = 1.0f;
     }
 
     Matrix34 projMatrix; // defines where projection should be applied in the world
     _smart_ptr<IMaterial> pMaterial; // decal material
     float fAlpha; // transparency of decal, used mostly for distance fading
     float fGrowAlphaRef;
+    float angleAttenuation;
     RectF rectTexture; // subset of texture to render
     uint32 nFlags;
     uint8 nSortOrder; // user defined sort order

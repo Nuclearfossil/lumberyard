@@ -140,6 +140,22 @@ public:
 
     SequenceType GetSequenceType() const override { return m_sequenceType; }
 
+    void SetExpanded(bool expanded) override
+    {
+        m_expanded = expanded;
+    }
+
+    bool GetExpanded() const override
+    {
+        return m_expanded;
+    }
+
+    unsigned int GetUniqueTrackIdAndGenerateNext() override
+    {
+        AZ_Assert(m_nextTrackId < UINT_MAX, "Max unique track ids used.");
+        return m_nextTrackId++;
+    }
+
     static void Reflect(AZ::SerializeContext* serializeContext);
 
 private:
@@ -186,20 +202,24 @@ private:
     bool m_bPaused;
     bool m_bActive;
 
-    uint32 m_lastGenId;
+    uint32 m_nextGenId;
 
     IAnimLegacySequenceObject* m_legacySequenceObject;   // legacy sequence objects are connected by pointer
 
     // NOTE: for Legacy components this contains the Sequence Id so that we have a single way to find an existing sequence
     AZ::EntityId        m_sequenceEntityId;  // SequenceComponent entities are connected by Id
 
-    IAnimNode* m_pActiveDirector;
+    IAnimNode* m_activeDirector;
+    int m_activeDirectorNodeId;
 
     float m_time;
 
     VectorSet<IEntity*> m_precachedEntitiesSet;
     SequenceType m_sequenceType;       // indicates if this sequence is connected to a legacy sequence entity or Sequence Component
 
+    bool m_expanded;
+
+    unsigned int m_nextTrackId = 1;
 };
 
 #endif // CRYINCLUDE_CRYMOVIE_ANIMSEQUENCE_H

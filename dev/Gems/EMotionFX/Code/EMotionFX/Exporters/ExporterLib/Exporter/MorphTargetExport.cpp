@@ -61,7 +61,7 @@ namespace ExporterLib
         MCore::LogDetailedInfo("    + RangeMax = %f", morphTarget->GetRangeMax());
         MCore::LogDetailedInfo("    + NumDeformDatas = %d", numDeformDatas);
         MCore::LogDetailedInfo("    + NumTransformations = %d", numTransformations);
-        MCore::LogDetailedInfo("    + PhonemesSets: %s", EMotionFX::MorphTarget::GetPhonemeSetString((EMotionFX::MorphTarget::EPhonemeSet)morphTarget->GetPhonemeSets()).AsChar());
+        MCore::LogDetailedInfo("    + PhonemesSets: %s", EMotionFX::MorphTarget::GetPhonemeSetString((EMotionFX::MorphTarget::EPhonemeSet)morphTarget->GetPhonemeSets()).c_str());
 
         // convert endian
         ConvertFloat(&morphTargetChunk.mRangeMin, targetEndianType);
@@ -84,7 +84,7 @@ namespace ExporterLib
             // write the deform data struct
             EMotionFX::MorphTargetStandard::DeformData* deformData = morphTarget->GetDeformData(i);
 
-            EMotionFX::FileFormat::Actor_MorphTargetMeshDeltas meshDeformDataChunk;
+            EMotionFX::FileFormat::Actor_MorphTargetMeshDeltas2 meshDeformDataChunk;
 
             meshDeformDataChunk.mNodeIndex  = deformData->mNodeIndex;
             meshDeformDataChunk.mNumVertices = deformData->mNumVerts;
@@ -102,7 +102,7 @@ namespace ExporterLib
             ConvertUnsignedInt(&meshDeformDataChunk.mNumVertices, targetEndianType);
             ConvertUnsignedInt(&meshDeformDataChunk.mNodeIndex, targetEndianType);
 
-            file->Write(&meshDeformDataChunk, sizeof(EMotionFX::FileFormat::Actor_MorphTargetMeshDeltas));
+            file->Write(&meshDeformDataChunk, sizeof(EMotionFX::FileFormat::Actor_MorphTargetMeshDeltas2));
 
 
             // write the position deltas
@@ -113,11 +113,9 @@ namespace ExporterLib
                 deltaP.mX = deformData->mDeltas[a].mPosition.mX;
                 deltaP.mY = deformData->mDeltas[a].mPosition.mY;
                 deltaP.mZ = deformData->mDeltas[a].mPosition.mZ;
-
                 ConvertUnsignedShort(&deltaP.mX, targetEndianType);
                 ConvertUnsignedShort(&deltaP.mY, targetEndianType);
                 ConvertUnsignedShort(&deltaP.mZ, targetEndianType);
-
                 file->Write(&deltaP, sizeof(EMotionFX::FileFormat::File16BitVector3));
             }
 
@@ -128,7 +126,6 @@ namespace ExporterLib
                 deltaN.mX = deformData->mDeltas[a].mNormal.mX;
                 deltaN.mY = deformData->mDeltas[a].mNormal.mY;
                 deltaN.mZ = deformData->mDeltas[a].mNormal.mZ;
-
                 file->Write(&deltaN, sizeof(EMotionFX::FileFormat::File8BitVector3));
             }
 
@@ -136,11 +133,20 @@ namespace ExporterLib
             EMotionFX::FileFormat::File8BitVector3 deltaT;
             for (a = 0; a < deformData->mNumVerts; ++a)
             {
-                deltaT.mX = deformData->mDeltas[a].mTangent.mX; // TODO: disable the tangents when they aren't there
+                deltaT.mX = deformData->mDeltas[a].mTangent.mX;
                 deltaT.mY = deformData->mDeltas[a].mTangent.mY;
                 deltaT.mZ = deformData->mDeltas[a].mTangent.mZ;
-
                 file->Write(&deltaT, sizeof(EMotionFX::FileFormat::File8BitVector3));
+            }
+
+            // write the bitangent deltas
+            EMotionFX::FileFormat::File8BitVector3 deltaBT;
+            for (a = 0; a < deformData->mNumVerts; ++a)
+            {
+                deltaBT.mX = deformData->mDeltas[a].mBitangent.mX;
+                deltaBT.mY = deformData->mDeltas[a].mBitangent.mY;
+                deltaBT.mZ = deformData->mDeltas[a].mBitangent.mZ;
+                file->Write(&deltaBT, sizeof(EMotionFX::FileFormat::File8BitVector3));
             }
 
             // write the vertex numbers
@@ -224,10 +230,11 @@ namespace ExporterLib
         {
             EMotionFX::MorphTargetStandard::DeformData* deformData = morphTarget->GetDeformData(i);
 
-            totalSize += sizeof(EMotionFX::FileFormat::Actor_MorphTargetMeshDeltas);
+            totalSize += sizeof(EMotionFX::FileFormat::Actor_MorphTargetMeshDeltas2);
             totalSize += deformData->mNumVerts * sizeof(EMotionFX::FileFormat::File16BitVector3); // positions
-            totalSize += deformData->mNumVerts * sizeof(EMotionFX::FileFormat::File8BitVector3); // normals
-            totalSize += deformData->mNumVerts * sizeof(EMotionFX::FileFormat::File8BitVector3); // tangents
+            totalSize += deformData->mNumVerts * sizeof(EMotionFX::FileFormat::File8BitVector3);  // normals
+            totalSize += deformData->mNumVerts * sizeof(EMotionFX::FileFormat::File8BitVector3);  // tangents
+            totalSize += deformData->mNumVerts * sizeof(EMotionFX::FileFormat::File8BitVector3);  // bitangents
             totalSize += deformData->mNumVerts * sizeof(uint32); // vertex indices
         }
 
@@ -309,13 +316,13 @@ namespace ExporterLib
             EMotionFX::MorphTarget* morphTarget = morphSetup->GetMorphTarget(i);
 
             // check if the name of the morph target is valid
-            if (morphTarget->GetNameString().GetIsEmpty())
+            if (morphTarget->GetNameString().empty())
             {
                 // rename the morph target
-                MCore::String morphTargetName;
-                morphTargetName.Format("Morph Target %d", MCore::GetIDGenerator().GenerateID());
-                MCore::LogWarning("The morph target has an empty name. The morph target will be automatically renamed to '%s'.", morphTargetName.AsChar());
-                morphTarget->SetName(morphTargetName.AsChar());
+                AZStd::string morphTargetName;
+                morphTargetName = AZStd::string::format("Morph Target %d", MCore::GetIDGenerator().GenerateID());
+                MCore::LogWarning("The morph target has an empty name. The morph target will be automatically renamed to '%s'.", morphTargetName.c_str());
+                morphTarget->SetName(morphTargetName.c_str());
             }
         }
 
@@ -323,12 +330,11 @@ namespace ExporterLib
         EMotionFX::FileFormat::FileChunk chunkHeader;
         chunkHeader.mChunkID        = EMotionFX::FileFormat::ACTOR_CHUNK_STDPMORPHTARGETS;
         chunkHeader.mSizeInBytes    = GetMorphSetupChunkSize(morphSetup);
-        chunkHeader.mVersion        = 1;
+        chunkHeader.mVersion        = 2;
 
         // endian convert the chunk and write it to the file
         ConvertFileChunk(&chunkHeader, targetEndianType);
         file->Write(&chunkHeader, sizeof(EMotionFX::FileFormat::FileChunk));
-
 
         // fill in the chunk header
         EMotionFX::FileFormat::Actor_MorphTargets morphTargetsChunk;
@@ -364,14 +370,14 @@ namespace ExporterLib
     }
 
 
-    bool AddMorphTarget(EMotionFX::Actor* actor, MCore::MemoryFile* file, const MCore::String& morphTargetName, uint32 captureMode, uint32 phonemeSets, float rangeMin, float rangeMax, uint32 geomLODLevel)
+    bool AddMorphTarget(EMotionFX::Actor* actor, MCore::MemoryFile* file, const AZStd::string& morphTargetName, uint32 captureMode, uint32 phonemeSets, float rangeMin, float rangeMax, uint32 geomLODLevel)
     {
         MCORE_ASSERT(actor && file);
 
         // check if the memory file actually contains any data
         if (file->GetFileSize() <= 0)
         {
-            MCore::LogWarning("Memory file does not contain any data. Skipping morph target '%s'.", morphTargetName.AsChar());
+            MCore::LogWarning("Memory file does not contain any data. Skipping morph target '%s'.", morphTargetName.c_str());
             return false;
         }
 
@@ -395,7 +401,7 @@ namespace ExporterLib
         EMotionFX::Actor* morphTargetActor = EMotionFX::GetImporter().LoadActor(file, &loadSettings);
         if (morphTargetActor == nullptr)
         {
-            MCore::LogError("Could not load morph target '%s'.", morphTargetName.AsChar());
+            MCore::LogError("Could not load morph target '%s'.", morphTargetName.c_str());
             return false;
         }
         /*
@@ -406,12 +412,12 @@ namespace ExporterLib
             }
         */
         // set the morph target name as actor name
-        morphTargetActor->SetName(morphTargetName.AsChar());
+        morphTargetActor->SetName(morphTargetName.c_str());
 
         // check if a morph target with the same name already exists
-        if (morphSetup->FindMorphTargetByName(morphTargetName.AsChar()))
+        if (morphSetup->FindMorphTargetByName(morphTargetName.c_str()))
         {
-            MCore::LogError("Error while adding morph target. There already is a morph target named '%s'. This will lead to view errors. Please check for duplicated morph target names.", morphTargetName.AsChar());
+            MCore::LogError("Error while adding morph target. There already is a morph target named '%s'. This will lead to view errors. Please check for duplicated morph target names.", morphTargetName.c_str());
             return false;
         }
 
@@ -420,19 +426,19 @@ namespace ExporterLib
         switch (captureMode)
         {
         case 0: // transforms
-            morphTarget = EMotionFX::MorphTargetStandard::Create(true, false, actor, morphTargetActor, morphTargetName.AsChar());
+            morphTarget = EMotionFX::MorphTargetStandard::Create(true, false, actor, morphTargetActor, morphTargetName.c_str());
             break;
 
         case 1: // mesh deforms
-            morphTarget = EMotionFX::MorphTargetStandard::Create(false, true, actor, morphTargetActor, morphTargetName.AsChar());
+            morphTarget = EMotionFX::MorphTargetStandard::Create(false, true, actor, morphTargetActor, morphTargetName.c_str());
             break;
 
         case 2: // both
-            morphTarget = EMotionFX::MorphTargetStandard::Create(true, true, actor, morphTargetActor, morphTargetName.AsChar());
+            morphTarget = EMotionFX::MorphTargetStandard::Create(true, true, actor, morphTargetActor, morphTargetName.c_str());
             break;
 
         default:
-            MCore::LogError("Capture mode undefined for '%s'", morphTargetName.AsChar());
+            MCore::LogError("Capture mode undefined for '%s'", morphTargetName.c_str());
             return false;
         }
 
@@ -448,7 +454,7 @@ namespace ExporterLib
         }
         else
         {
-            MCore::LogWarning("Skipping morph target '%s' as it doesn't contain any transformations as well as deform datas.", morphTargetName.AsChar());
+            MCore::LogWarning("Skipping morph target '%s' as it doesn't contain any transformations as well as deform datas.", morphTargetName.c_str());
             morphTarget->Destroy();
         }
 

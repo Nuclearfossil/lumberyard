@@ -109,7 +109,9 @@ SEditorSettings::SEditorSettings()
     bSettingsManagerMode = false;
 
     undoLevels = 50;
+    m_undoSliceOverrideSaveValue = false;
     bShowDashboardAtStartup = true;
+    m_showCircularDependencyError = true;
     bAutoloadLastLevelAtStartup = false;
     bMuteAudio = false;
     bEnableGameModeVR = false;
@@ -125,7 +127,7 @@ SEditorSettings::SEditorSettings()
 
     bAutoSaveTagPoints = false;
 
-    bNavigationContinuousUpdate = true;
+    bNavigationContinuousUpdate = false;
     bNavigationShowAreas = true;
     bNavigationDebugDisplay = false;
     bVisualizeNavigationAccessibility = false;
@@ -165,6 +167,7 @@ SEditorSettings::SEditorSettings()
     cameraRotateSpeed = 1;
     cameraFastMoveSpeed = 2;
     stylusMode = false;
+    restoreViewportCamera = true;
     wheelZoomSpeed = 1;
     invertYRotation = false;
     invertPan = false;
@@ -187,6 +190,7 @@ SEditorSettings::SEditorSettings()
     bLayerDoubleClicking = false;
 
     enableSceneInspector = false;
+    enableLegacyUI = false;
 
     strStandardTempDirectory = "Temp";
     strEditorEnv = "Editor/Editor.env";
@@ -500,7 +504,9 @@ void SEditorSettings::Save()
 
     // Save settings to registry.
     SaveValue("Settings", "UndoLevels", undoLevels);
+    SaveValue("Settings", "UndoSliceOverrideSaveValue", m_undoSliceOverrideSaveValue);
     SaveValue("Settings", "ShowDashboardAtStartup", bShowDashboardAtStartup);
+    SaveValue("Settings", "ShowCircularDependencyError", m_showCircularDependencyError);
     SaveValue("Settings", "AutoloadLastLevelAtStartup", bAutoloadLastLevelAtStartup);
     SaveValue("Settings", "MuteAudio", bMuteAudio);
     SaveValue("Settings", "AutoBackup", autoBackupEnabled);
@@ -510,6 +516,7 @@ void SEditorSettings::Save()
     SaveValue("Settings", "CameraMoveSpeed", cameraMoveSpeed);
     SaveValue("Settings", "CameraRotateSpeed", cameraRotateSpeed);
     SaveValue("Settings", "StylusMode", stylusMode);
+    SaveValue("Settings", "RestoreViewportCamera", restoreViewportCamera);
     SaveValue("Settings", "WheelZoomSpeed", wheelZoomSpeed);
     SaveValue("Settings", "InvertYRotation", invertYRotation);
     SaveValue("Settings", "InvertPan", invertPan);
@@ -540,6 +547,7 @@ void SEditorSettings::Save()
     SaveValue("Settings", "LayerDoubleClicking", bLayerDoubleClicking);
 
     SaveValue("Settings", "EnableSceneInspector", enableSceneInspector);
+    SaveValue("Settings", "EnableLegacyUI", enableLegacyUI);
     
     //////////////////////////////////////////////////////////////////////////
     // Viewport settings.
@@ -779,7 +787,9 @@ void SEditorSettings::Load()
     QString     strPlaceholderString;
     // Load settings from registry.
     LoadValue("Settings", "UndoLevels", undoLevels);
+    LoadValue("Settings", "UndoSliceOverrideSaveValue", m_undoSliceOverrideSaveValue);  
     LoadValue("Settings", "ShowDashboardAtStartup", bShowDashboardAtStartup);
+    LoadValue("Settings", "ShowCircularDependencyError", m_showCircularDependencyError);
     LoadValue("Settings", "AutoloadLastLevelAtStartup", bAutoloadLastLevelAtStartup);
     LoadValue("Settings", "MuteAudio", bMuteAudio);
     LoadValue("Settings", "AutoBackup", autoBackupEnabled);
@@ -789,6 +799,7 @@ void SEditorSettings::Load()
     LoadValue("Settings", "CameraMoveSpeed", cameraMoveSpeed);
     LoadValue("Settings", "CameraRotateSpeed", cameraRotateSpeed);
     LoadValue("Settings", "StylusMode", stylusMode);
+    LoadValue("Settings", "RestoreViewportCamera", restoreViewportCamera);
     LoadValue("Settings", "WheelZoomSpeed", wheelZoomSpeed);
     LoadValue("Settings", "InvertYRotation", invertYRotation);
     LoadValue("Settings", "InvertPan", invertPan);
@@ -813,7 +824,7 @@ void SEditorSettings::Load()
     LoadValue("Settings", "TemporaryDirectory", strStandardTempDirectory);
     LoadValue("Settings", "EditorEnv", strEditorEnv);
 
-    int consoleBackgroundColorThemeInt;
+    int consoleBackgroundColorThemeInt = (int)consoleBackgroundColorTheme;
     LoadValue("Settings", "ConsoleBackgroundColorTheme", consoleBackgroundColorThemeInt);
     consoleBackgroundColorTheme = (ConsoleColorTheme)consoleBackgroundColorThemeInt;
     if (consoleBackgroundColorTheme != ConsoleColorTheme::Dark && consoleBackgroundColorTheme != ConsoleColorTheme::Light)
@@ -825,6 +836,7 @@ void SEditorSettings::Load()
     LoadValue("Settings", "LayerDoubleClicking", bLayerDoubleClicking);
 
     LoadValue("Settings", "EnableSceneInspector", enableSceneInspector);
+    LoadValue("Settings", "EnableLegacyUI", enableLegacyUI);
     
     //////////////////////////////////////////////////////////////////////////
     // Viewport Settings.
@@ -1144,7 +1156,7 @@ bool SEditorSettings::BrowseTerrainTexture(bool bIsSave)
     else
     {
         fileName = "terraintex.bmp";
-        strcpy(path, Path::GamePathToFullPath("").toUtf8().data());
+        azstrcpy(path, MAX_PATH, Path::GamePathToFullPath("").toUtf8().data());
     }
 
     if (bIsSave)

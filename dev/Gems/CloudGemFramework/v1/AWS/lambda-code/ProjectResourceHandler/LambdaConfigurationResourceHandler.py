@@ -8,7 +8,7 @@
 # remove or modify any license notices. This file is distributed on an "AS IS" BASIS,
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 #
-# $Revision: #2 $
+# $Revision: #1 $
 
 # Python
 import collections
@@ -22,6 +22,8 @@ from zipfile import ZipFile, ZipInfo
 
 # Boto3
 import boto3
+import botocore
+
 from botocore.exceptions import ClientError
 
 # ServiceDirectory
@@ -37,9 +39,9 @@ from cgf_utils import properties
 from cgf_utils import role_utils
 
 CLOUD_GEM_FRAMEWORK = 'CloudGemFramework'
-
 iam = aws_utils.ClientWrapper(boto3.client('iam'))
-s3 = aws_utils.ClientWrapper(boto3.client('s3'), do_not_log_args = ['Body'])
+cfg = botocore.config.Config(read_timeout=70, connect_timeout=70)
+s3 = aws_utils.ClientWrapper(boto3.client('s3', config=cfg), do_not_log_args = ['Body'])
 
 def get_default_policy(project_service_lambda_arn):
     policy = {
@@ -95,7 +97,8 @@ PROPERTIES_SCHEMA = {
             'InterfaceId': properties.String(),
             'Optional': properties.Boolean(default = False)
         }
-    )
+    ),
+    'IgnoreAppendingSettingsToZip': properties.Boolean(default = False)
 }
 
 
@@ -125,7 +128,6 @@ def handler(event, context):
         if request_type == 'Create':
 
             project_service_lambda_arn = _get_project_service_lambda_arn(stack)
-
             assume_role_service = 'lambda.amazonaws.com'
             role_arn = role_utils.create_access_control_role(
                 stack_manager,
@@ -143,17 +145,21 @@ def handler(event, context):
 
         else:
             raise RuntimeError('Unexpected request type: {}'.format(request_type))
-
         _add_built_in_settings(props.Settings.__dict__, stack)
         # give access to project level ServiceDirectory APIs
         # Other deployment-level APIs are handled in InterfaceDependeny resolver custom resource type
         permitted_arns = _add_services_settings(stack, props.Settings.__dict__, props.Services)
         _add_service_access_policy_to_role(role_arn, permitted_arns)
         # Check if we have a folder just for this function, if not use the default
-        input_key = _get_input_key(props)
+        output_key = input_key = _get_input_key(props)
+        if not props.IgnoreAppendingSettingsToZip:
+            output_key = _inject_settings(props.Settings.__dict__, props.Runtime, props.ConfigurationBucket, input_key, props.FunctionName)
 
-        output_key = _inject_settings(props.Settings.__dict__, props.Runtime, props.ConfigurationBucket, input_key, props.FunctionName)
-
+        cc_settings = copy.deepcopy(props.Settings.__dict__)
+        # Remove "Services" from settings because they get injected into the python code package during _inject_settings
+        # TODO: move handling of project-level service interfaces to the same code as cross-gemm interfaces
+        if "Services" in cc_settings:
+            del cc_settings["Services"]
         response_data = {
             'ConfigurationBucket': props.ConfigurationBucket,
             'ConfigurationKey': output_key,
@@ -165,13 +171,16 @@ def handler(event, context):
                     'S3Bucket': props.ConfigurationBucket,
                     'S3Key': output_key
                 },
+                "Environment": {
+                    "Variables": cc_settings
+                },
                 'Role': role_arn,
                 'Runtime': props.Runtime
-            }
+            },
+            "CCSettings": cc_settings
         }
 
     physical_resource_id = aws_utils.construct_custom_physical_resource_id_with_data(stack_arn, event['LogicalResourceId'], id_data)
-
     custom_resource_response.succeed(event, context, response_data, physical_resource_id)
 
 
@@ -186,35 +195,24 @@ def _get_input_key(props):
 
 
 def _add_built_in_settings(settings, stack):
-
-    if stack.deployment_access:
-        pool = stack.deployment_access.resources.get_by_logical_id("PlayerAccessIdentityPool", "Custom::CognitoIdentityPool", optional = True)
-        if pool:
-            settings["CloudCanvas::IdentityPool"] = pool.physical_id
-            print 'Adding setting CloudCanvas::IdentityPool = {}'.format(settings["CloudCanvas::IdentityPool"])
-        else:
-            print 'Skipping setting CloudCanvas::IdentityPool: PlayerAccessIdentityPool not found.'
-    else:
-        print 'Skipping setting CloudCanvas::IdentityPool: access stack not found.'
-
     if stack.project:
 
         # TODO: remove ServiceLambda and switch CloudGemPlayerAccount over to using service interfaces.
         project_service_lambda = stack.project.resources.get_by_logical_id("ServiceLambda", "AWS::Lambda::Function", optional = True)
         if project_service_lambda:
-            settings["CloudCanvas::ServiceLambda"] = project_service_lambda.physical_id
-            print 'Adding setting CloudCanvas::ServiceLambda = {}'.format(settings["CloudCanvas::ServiceLambda"])
+            settings["CloudCanvasServiceLambda"] = project_service_lambda.physical_id
+            print 'Adding setting CloudCanvasServiceLambda = {}'.format(settings["CloudCanvasServiceLambda"])
         else:
-            print 'Skipping setting CloudCanvas::ServiceLambda: resource not found.'
+            print 'Skipping setting CloudCanvasServiceLambda: resource not found.'
 
     else:
-        print 'Skipping setting CloudCanvas::ServiceLambda: project stack not found.'
+        print 'Skipping setting CloudCanvasServiceLambda: project stack not found.'
 
     if stack.deployment:
-        settings["CloudCanvas::DeploymentName"] = stack.deployment.deployment_name
-        print 'Adding setting CloudCanvas::DeploymentName = {}'.format(settings["CloudCanvas::DeploymentName"])
+        settings["CloudCanvasDeploymentName"] = stack.deployment.deployment_name
+        print 'Adding setting CloudCanvasDeploymentName = {}'.format(settings["CloudCanvasDeploymentName"])
     else:
-        print 'Skipping setting CloudCanvas::DeploymentName: deployment stack not found.'
+        print 'Skipping setting CloudCanvasDeploymentName: deployment stack not found.'
 
 
 def _add_services_settings(stack, settings, services):
@@ -379,8 +377,9 @@ def _inject_settings_python(zip_file, settings):
 
     info = ZipInfo('cgf_lambda_settings/settings.json')
     info.external_attr = 0777 << 16L # give full access to included file
-
+    print 'writing the settings', settings
     zip_file.writestr(info, content)
+    print 'completed the write of the settings to the zip file'
 
 
 def _inject_settings_nodejs(zip_file, settings):
@@ -413,20 +412,31 @@ def _inject_settings(settings, runtime, bucket, input_key, function_name):
     if len(settings) == 0:
         return input_key
 
+    if not "Services" in settings:
+        print 'No services found in settings, skipping settings injection to code zip in favor of using environment vars'
+        return input_key
+
+    service_settings = {}
+    service_settings["Services"] = settings.get("Services", {})
+    settings = service_settings
+
     output_key = input_key + '.' + function_name + '.configured'
 
     injector = _get_settings_injector(runtime)
 
+    print "Downloading the S3 file {}/{} to inject the settings property.".format(bucket, input_key)
     res = s3.get_object(Bucket=bucket, Key=input_key)
     zip_content = StringIO(res['Body'].read())
-    with ZipFile(zip_content, 'a') as zip_file:
-        injector(zip_file, settings)
-
+    zip_file = ZipFile(zip_content, mode='a')
+    injector(zip_file, settings)
+    zip_file.close()
+    print "Uploading the S3 file {}/{} to S3 file {}/{}.".format(bucket, input_key, bucket, output_key)
     res = s3.put_object(Bucket=bucket, Key=output_key, Body=zip_content.getvalue())
-
+    print "Setting injection complete for {}".format(output_key)
     zip_content.close()
 
     return output_key
+
 
 
 def _get_settings_injector(runtime):

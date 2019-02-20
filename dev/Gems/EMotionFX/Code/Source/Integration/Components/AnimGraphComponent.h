@@ -49,7 +49,7 @@ namespace EMotionFX
             {
                 AZ_TYPE_INFO(ParameterDefaults, "{E6826EB9-C79B-43F3-A03F-3298DD3C724E}")
 
-                    ParameterDefaults();
+                ParameterDefaults();
                 ~ParameterDefaults();
                 ParameterDefaults& operator=(const ParameterDefaults& rhs)
                 {
@@ -81,8 +81,9 @@ namespace EMotionFX
 
                     Configuration();
 
-                AZ::Data::Asset<AnimGraphAsset>    m_animGraphAsset;          ///< Selected anim graph.
-                AZ::Data::Asset<MotionSetAsset>     m_motionSetAsset;           ///< Selected motion set.
+                AZ::Data::Asset<AnimGraphAsset>     m_animGraphAsset;           ///< Selected anim graph.
+                AZ::Data::Asset<MotionSetAsset>     m_motionSetAsset;           ///< Selected motion set asset.
+                AZStd::string                       m_activeMotionSetName;      ///< Selected motion set.
                 ParameterDefaults                   m_parameterDefaults;        ///< Defaults for parameter values.
 
                 static void Reflect(AZ::ReflectContext* context);
@@ -100,7 +101,7 @@ namespace EMotionFX
 
             //////////////////////////////////////////////////////////////////////////
             // AnimGraphComponentRequestBus::Handler
-            EMotionFX::AnimGraphInstance* GetAnimGraphInstance() override { return m_animGraphInstance.get(); }
+            EMotionFX::AnimGraphInstance* GetAnimGraphInstance() override { return m_animGraphInstance ? m_animGraphInstance.get() : nullptr; }
             AZ::u32 FindParameterIndex(const char* parameterName) override;
             void SetParameterFloat(AZ::u32 parameterIndex, float value) override;
             void SetParameterBool(AZ::u32 parameterIndex, bool value) override;
@@ -147,14 +148,18 @@ namespace EMotionFX
             static void GetIncompatibleServices(AZ::ComponentDescriptor::DependencyArrayType& incompatible)
             {
                 incompatible.push_back(AZ_CRC("EMotionFXAnimGraphService", 0x9ec3c819));
+                incompatible.push_back(AZ_CRC("EMotionFXSimpleMotionService", 0xea7a05d8));
             }
 
-            static void GetDependentServices(AZ::ComponentDescriptor::DependencyArrayType& /*dependent*/)
+            static void GetDependentServices(AZ::ComponentDescriptor::DependencyArrayType& dependent)
             {
+                dependent.push_back(AZ_CRC("PhysicsService", 0xa7350d22));
+                dependent.push_back(AZ_CRC("MeshService", 0x71d8a455));
             }
 
             static void GetRequiredServices(AZ::ComponentDescriptor::DependencyArrayType& required)
             {
+                required.push_back(AZ_CRC("TransformService", 0x8ee22c50));
                 required.push_back(AZ_CRC("EMotionFXActorService", 0xd6e8f48d));
             }
 
@@ -177,7 +182,7 @@ namespace EMotionFX
             Configuration                               m_configuration;        ///< Component configuration.
 
             EMotionFXPtr<EMotionFX::ActorInstance>      m_actorInstance;        ///< Associated actor instance (retrieved from Actor Component).
-            EMotionFXPtr<EMotionFX::AnimGraphInstance> m_animGraphInstance;   ///< Live anim graph instance.
+            EMotionFXPtr<EMotionFX::AnimGraphInstance>  m_animGraphInstance;    ///< Live anim graph instance.
         };
 
     } // namespace Integration

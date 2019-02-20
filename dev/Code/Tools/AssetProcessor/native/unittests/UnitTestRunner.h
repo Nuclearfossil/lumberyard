@@ -142,6 +142,7 @@ namespace UnitTestUtils
         void Setup(QString newDir)
         {
             m_originalDir = QDir::currentPath();
+            newDir = QDir::cleanPath(newDir);
             QDir::setCurrent(newDir);
 
             m_localFileIO = aznew AZ::IO::LocalFileIO();
@@ -190,6 +191,8 @@ public:
     virtual ~UnitTestRegistry() {}
     static UnitTestRegistry* first() { return s_first; }
     UnitTestRegistry* next() const { return m_next; }
+    const char* getName() const { return m_name; }
+
     virtual UnitTestRun* create() = 0;
 protected:
     // it forms a static linked-list using the following internal:

@@ -44,7 +44,7 @@ namespace StarterGameGem
         AZ::SerializeContext* serializeContext = azrtti_cast<AZ::SerializeContext*>(reflection);
         if (serializeContext)
         {
-            serializeContext->Class<WaypointsComponent>()
+            serializeContext->Class<WaypointsComponent, AZ::Component>()
                 ->Version(1)
                 ->Field("Config", &WaypointsComponent::m_config)
             ;
@@ -73,7 +73,7 @@ namespace StarterGameGem
         flags.SetFillMode(e_FillModeSolid);
         renderAuxGeom->SetRenderFlags(flags);
 
-        static ICVar* const cvarDrawWaypoints= gEnv->pConsole->GetCVar("ai_debugDrawWaypoints");
+        static ICVar* const cvarDrawWaypoints = gEnv->pConsole->GetCVar("ai_debugDrawWaypoints");
         if (cvarDrawWaypoints)
         {
             if (cvarDrawWaypoints->GetFVal() != 0 && m_config.m_waypoints.size() >= 2)
@@ -104,7 +104,7 @@ namespace StarterGameGem
         }
         else
         {
-            AZ_Assert("AI", "WaypointsComponent: Tried to get the first waypoint but no waypoints exist.");
+            AZ_Assert(false, "WaypointsComponent: Tried to get the first waypoint but no waypoints exist.");
         }
 
         return res;
@@ -162,27 +162,30 @@ namespace StarterGameGem
         // Only bother copying the waypoints if we're not a sentry.
         if (!this->IsSentry() && !this->IsLazySentry())
         {
-            VecOfEntityIds* waypoints;
+            VecOfEntityIds* waypoints = nullptr;
             WaypointsComponentRequestsBus::EventResult(waypoints, srcEntityId, &WaypointsComponentRequestsBus::Events::GetWaypoints);
-            m_config.m_waypoints = *waypoints;
-
-            // Clean up the vector so we don't have empty or invalid entries.
-            for (VecOfEntityIds::iterator it = m_config.m_waypoints.begin(); it != m_config.m_waypoints.end(); )
+            if (waypoints)
             {
-                if (!(*it).IsValid())
-                {
-                    it = m_config.m_waypoints.erase(it);
-                }
-                else
-                {
-                    ++it;
-                }
-            }
+                m_config.m_waypoints = *waypoints;
 
-            // If we didn't copy any waypoints then assign ourselves as a lazy sentry.
-            if (m_config.m_waypoints.size() == 0)
-            {
-                m_config.m_isLazySentry = true;
+                // Clean up the vector so we don't have empty or invalid entries.
+                for (VecOfEntityIds::iterator it = m_config.m_waypoints.begin(); it != m_config.m_waypoints.end();)
+                {
+                    if (!(*it).IsValid())
+                    {
+                        it = m_config.m_waypoints.erase(it);
+                    }
+                    else
+                    {
+                        ++it;
+                    }
+                }
+
+                // If we didn't copy any waypoints then assign ourselves as a lazy sentry.
+                if (m_config.m_waypoints.size() == 0)
+                {
+                    m_config.m_isLazySentry = true;
+                }
             }
         }
 
@@ -198,5 +201,4 @@ namespace StarterGameGem
     {
         return &m_config.m_waypoints;
     }
-
 }

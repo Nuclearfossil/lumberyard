@@ -42,6 +42,7 @@ namespace AssetProcessor
     class AssetCatalog;
     class InternalAssetBuilderInfo;
     class AssetRequestHandler;
+    class FileProcessor;
 }
 
 class ApplicationServer;
@@ -77,8 +78,6 @@ public:
 
     AssetProcessor::RCController* GetRCController() const;
 
-    AzToolsFramework::AssetDatabase::AssetDatabaseConnection* GetAssetDatabaseConnection() const;
-
     ConnectionManager* GetConnectionManager() const;
     ApplicationServer* GetApplicationServer() const;
 
@@ -105,6 +104,8 @@ public:
 
     //! DiskSpaceInfoBus::Handler
     bool CheckSufficientDiskSpace(const QString& savePath, qint64 requiredSpace, bool shutdownIfInsufficient) override;
+
+    void RemoveOldTempFolders();
 
 Q_SIGNALS:
     void CheckAssetProcessorManagerIdleState();
@@ -136,6 +137,8 @@ protected:
     void ShutdownBuilderManager();
     bool InitAssetDatabase();
     void ShutDownAssetDatabase();
+    void InitFileProcessor();
+    void ShutDownFileProcessor();
 
     // IMPLEMENTATION OF -------------- AzToolsFramework::AssetDatabase::AssetDatabaseRequests::Bus::Listener
     bool GetAssetDatabaseLocation(AZStd::string& location) override;
@@ -157,10 +160,6 @@ private Q_SLOTS:
     void CheckForIdle();
 
 private:
-#ifdef UNIT_TEST
-    bool RunUnitTests();
-#endif
-
     int m_processedAssetCount = 0;
     int m_failedAssetsCount = 0;
     bool m_AssetProcessorManagerIdleState = false;
@@ -173,9 +172,10 @@ private:
     AssetProcessor::AssetCatalog* m_assetCatalog = nullptr;
     AssetProcessor::AssetScanner* m_assetScanner = nullptr;
     AssetProcessor::RCController* m_rcController = nullptr;
-    AssetProcessor::AssetDatabaseConnection* m_assetDatabaseConnection = nullptr;
     AssetProcessor::AssetRequestHandler* m_assetRequestHandler = nullptr;
     AssetProcessor::BuilderManager* m_builderManager = nullptr;
+
+    AZStd::unique_ptr<AssetProcessor::FileProcessor> m_fileProcessor;
 
     // The internal builder
     AZStd::shared_ptr<AssetProcessor::InternalRecognizerBasedBuilder> m_internalBuilder;
@@ -192,21 +192,7 @@ private:
     // Collection of all the external module builders
     AZStd::list<AssetProcessor::ExternalModuleAssetBuilderInfo*>    m_externalAssetBuilders;
 
-    struct ExternalAssetBuilderRegistration
-    {
-        ExternalAssetBuilderRegistration() = default;
-        ExternalAssetBuilderRegistration(AssetProcessor::ExternalModuleAssetBuilderInfo* builderInfo, AZStd::string builderFilePath)
-            : m_builderInfo(builderInfo),
-            m_builderFilePath(builderFilePath)
-        {
-
-        }
-
-        AssetProcessor::ExternalModuleAssetBuilderInfo* m_builderInfo = nullptr;
-        AZStd::string m_builderFilePath;
-    };
-
-    ExternalAssetBuilderRegistration m_currentExternalAssetBuilder;
+    AssetProcessor::ExternalModuleAssetBuilderInfo* m_currentExternalAssetBuilder = nullptr;
     
     QAtomicInt m_connectionsAwaitingAssetCatalogSave = 0;
     int m_remainingAPMJobs = 0;
@@ -214,6 +200,8 @@ private:
 
     unsigned int m_highestConnId = 0;
     AzToolsFramework::Ticker* m_ticker = nullptr; // for ticking the tickbus.
+
+    QList<QMetaObject::Connection> m_connectionsToRemoveOnShutdown;
 };
 
 

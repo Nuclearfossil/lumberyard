@@ -15,8 +15,9 @@
 
 #include <AzCore/Component/Component.h>
 
-#include <CloudCanvas/CloudCanvasIdentityBus.h>
+#include <AzCore/std/containers/map.h>
 
+#include <CloudCanvas/CloudCanvasIdentityBus.h>
 #include <CloudCanvasCommon/CloudCanvasCommonBus.h>
 
 #pragma warning(push)
@@ -82,14 +83,22 @@ namespace CloudGemFramework
         virtual bool ResetPlayerIdentity() override;
         virtual AZStd::string GetIdentityId() override;
 
-        ////////////////////////////////////////////////////////////////////////
-        // CloudCanvasCommonNotification Events
-        void OnPostInitialization() override;
     protected:
         Aws::Map<Aws::String, std::shared_ptr<TokenRetrievalStrategy> > InitializeTokenRetrievalStrategies(const std::shared_ptr<Aws::Lambda::LambdaClient>& client, const char* lambdaName);
         bool GetRefreshTokenForProvider(AZStd::string& refreshToken, const AZStd::string& provider);
 
+        // CloudCanvasCommonNotificationBus
+        void ApiInitialized() override;
+
     private:
+        CloudCanvasPlayerIdentityComponent(const CloudCanvasPlayerIdentityComponent&) = delete;
+
+        bool BeginResetIdentity();
+        void EndResetIdentity();
+
+        // Http Access Checks
+        bool CheckRegionHttpAccess(const AZStd::string& identityPoolId) const;
+        int CheckAwsEndpointResponse(const AZStd::string& regionStr) const;
 
         std::shared_ptr<Aws::CognitoIdentity::CognitoIdentityClient> m_cognitoIdentityClientAnonymous;
         std::shared_ptr<Aws::CognitoIdentity::CognitoIdentityClient> m_cognitoIdentityClientAuthenticated;
@@ -98,9 +107,12 @@ namespace CloudGemFramework
         std::shared_ptr<Aws::Auth::CognitoCachingCredentialsProvider> m_authCredsProvider;
         std::shared_ptr<Aws::Auth::PersistentCognitoIdentityProvider> m_authIdentityProvider;
 
-        Aws::Map<Aws::String, std::shared_ptr<TokenRetrievalStrategy> > m_additionalStrategyMappings;
+        AZStd::map<Aws::String, std::shared_ptr<TokenRetrievalStrategy> > m_additionalStrategyMappings;
 
         std::shared_ptr<Aws::Auth::AWSCredentialsProvider> m_credsProvider;
+
+        AZStd::atomic<bool> m_resettingIdentity{ false };
+        AZStd::mutex m_credentialsMutex;
     };
 }
 

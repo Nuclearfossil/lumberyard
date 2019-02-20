@@ -46,6 +46,8 @@ namespace Maestro
 
         AZ::Uuid GetAnimatedAddressTypeId(const AnimatablePropertyAddress& animatableAddress) override;
 
+        void GetAssetDuration(AnimatedValue& returnValue, AZ::ComponentId componentId, const AZ::Data::AssetId& assetId) override;
+
         void ConnectSequence(const AZ::EntityId& sequenceEntityId) override;
         void DisconnectSequence() override;
         //~SequenceAgentComponentRequestBus::Handler Interface
@@ -65,6 +67,9 @@ namespace Maestro
         {
             return component.RTTI_GetType();
         }
+
+        // Get all of the components available on the current entity.
+        void GetEntityComponents(AZ::Entity::ComponentArrayType& entityComponents) const override;
 
     private:
         // connect and disconnect to all SequenceComponents registered with us

@@ -14,6 +14,8 @@
 #include <QtWidgets/QFrame>
 #include <AzCore/std/string/string.h>
 
+#include <AzQtComponents/Components/Widgets/CardHeader.h>
+
 class QHBoxLayout;
 class QLabel;
 class QPushButton;
@@ -27,7 +29,7 @@ namespace AzToolsFramework
      * via the appropriate setter (ex: SetIcon causes the icon widget to appear).
      */
     class ComponentEditorHeader
-        : public QFrame
+        : public AzQtComponents::CardHeader
     {
         Q_OBJECT;
     public:
@@ -35,6 +37,12 @@ namespace AzToolsFramework
 
         /// Set a title. Passing an empty string will hide the widget.
         void SetTitle(const QString& title);
+
+        /// Set a title style option.
+        void setTitleProperty(const char *name, const QVariant &value);
+
+        /// Redraw title to get new style to work
+        void RefreshTitle();
 
         /// Set an icon. Passing a null icon will hide the widget.
         void SetIcon(const QIcon& icon);
@@ -63,14 +71,12 @@ namespace AzToolsFramework
         void SetHelpURL(AZStd::string& url);
         void ClearHelpURL();
 
+        void SetFilterString(const AZStd::string& str);
     Q_SIGNALS:
         void OnContextMenuClicked(const QPoint& position);
         void OnExpanderChanged(bool expanded);
 
     private:
-        void mousePressEvent(QMouseEvent *event) override;
-        void mouseDoubleClickEvent(QMouseEvent *event) override;
-        void contextMenuEvent(QContextMenuEvent *event) override;
         void TriggerContextMenuUnderButton();
         void UpdateStyleSheets();
         void TriggerHelpButton();
@@ -85,6 +91,8 @@ namespace AzToolsFramework
         QLabel* m_warningLabel = nullptr;
         QPushButton* m_contextMenuButton = nullptr;
         QPushButton* m_helpButton = nullptr;
+        QString m_title;
+        QString m_currentFilterString;
         bool m_warning = false;
         bool m_readOnly = false;
 

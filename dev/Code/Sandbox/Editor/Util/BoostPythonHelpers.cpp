@@ -47,6 +47,7 @@
 #include <QApplication>
 #include <QDir>
 #include <QFile>
+#include <QProcessEnvironment>
 
 #include <AzQtComponents/Utilities/QtPluginPaths.h>
 
@@ -497,7 +498,7 @@ void PyGameSubMaterial::UpdateSubMaterial()
 
             for (int j = 0; j < shdResources.m_ShaderParams.size(); j++)
             {
-                if (QString::compare(pVar->GetName(), shdResources.m_ShaderParams[j].m_Name) == 0)
+                if (QString::compare(pVar->GetName(), shdResources.m_ShaderParams[j].m_Name.c_str()) == 0)
                 {
                     pParam = &shdResources.m_ShaderParams[j];
 
@@ -2427,7 +2428,7 @@ namespace PyScript
         {
             modules[i].initFunc();  // RegisterFunctionsForModule() called here
             string importStatement;
-            importStatement.Format("import %s", modules[i].name.c_str());
+            importStatement.Format("import %s", modules[i].name);
             PyRun_SimpleString(importStatement.c_str());
         }
     }
@@ -2811,7 +2812,8 @@ namespace PyScript
         // Behavior for non-windows builds is still TBD, but using PYTHONHOME
         // from the envionment may work as a fallback.
 
-        QString pythonHome = getenv("LY_PYTHONHOME");
+        auto env = QProcessEnvironment::systemEnvironment();
+        QString pythonHome = env.value("LY_PYTHONHOME");
         if (pythonHome.isEmpty())
         {
 #ifdef WIN32
@@ -2819,7 +2821,7 @@ namespace PyScript
             pythonHome.replace('/', '\\');
             pythonHome.replace("@root@", rootEngineDir);
 #else
-            pythonHome = getenv("PYTHONHOME");
+            pythonHome = env.value("PYTHONHOME");
 #endif
         }
 
@@ -2909,4 +2911,5 @@ DECLARE_PYTHON_MODULE(lodtools);
 DECLARE_PYTHON_MODULE(prefab);
 DECLARE_PYTHON_MODULE(vegetation);
 DECLARE_PYTHON_MODULE(shape);
+DECLARE_PYTHON_MODULE(checkout_dialog);
 

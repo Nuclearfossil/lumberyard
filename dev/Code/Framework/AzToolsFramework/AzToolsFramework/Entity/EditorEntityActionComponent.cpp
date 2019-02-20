@@ -22,7 +22,7 @@
 #include <AzToolsFramework/ToolsComponents/GenericComponentWrapper.h>
 #include <AzCore/std/containers/map.h>
 #include <AzToolsFramework/ToolsComponents/EditorDisabledCompositionBus.h>
-#include <AzToolsFramework/ToolsComponents/EditorPendingCompositionBus.h>
+#include <AzToolsFramework/ToolsComponents/EditorPendingCompositionComponent.h>
 #include "EditorEntityHelpers.h"
 
 #include <QMimeData>
@@ -93,11 +93,16 @@ namespace AzToolsFramework
                 AZ::ComponentDescriptor::DependencyArrayType providedServices;
                 componentDescriptor->GetProvidedServices(providedServices, component);
 
-                for (auto& providedService : providedServices)
+                for (AZ::ComponentDescriptor::DependencyArrayType::iterator providedService = providedServices.begin();
+                    providedService != providedServices.end(); ++providedService)
                 {
+                    AZ::EntityUtils::RemoveDuplicateServicesOfAndAfterIterator(
+                        providedService, 
+                        providedServices,
+                        component ? component->GetEntity() : nullptr);
                     for (auto existingComponent : existingComponents)
                     {
-                        if (IsComponentIncompatibleWithService(existingComponent, providedService))
+                        if (IsComponentIncompatibleWithService(existingComponent, *providedService))
                         {
                             return true;
                         }
@@ -200,6 +205,19 @@ namespace AzToolsFramework
             bool ComponentsAreIncompatible(const AZ::Component* componentA, AZ::Component* componentB)
             {
                 return IsComponentIncompatibleWithExistingComponents(componentA, { componentB }) || AreExistingComponentsIncompatibleWithComponent(componentA, { componentB });
+            }
+
+            // During component loading and validation, we have to deal with entities that haven't been initialized yet,
+            // and in these cases we take the unorthodox step of communicating directly
+            // with the component rather than using the EBus.
+            EditorPendingCompositionRequests* GetPendingCompositionHandler(const AZ::Entity& entity)
+            {
+                EditorPendingCompositionRequests* pendingCompositionHandler = EditorPendingCompositionRequestBus::FindFirstHandler(entity.GetId());
+                if (!pendingCompositionHandler)
+                {
+                    pendingCompositionHandler = entity.FindComponent<EditorPendingCompositionComponent>();
+                }
+                return pendingCompositionHandler;
             }
         } // namespace
 
@@ -341,6 +359,8 @@ namespace AzToolsFramework
                     // If entity is not active now, something failed hardcore
                     AZ_Assert(entity->GetState() == AZ::Entity::ES_ACTIVE, "Failed to reactivate entity even after scrubbing on component removal");
                 }
+
+                EntityCompositionNotificationBus::Broadcast(&EntityCompositionNotificationBus::Events::OnEntityComponentEnabled, entity->GetId(), componentId);
             }
         }
 
@@ -395,6 +415,8 @@ namespace AzToolsFramework
                     // If entity is not active now, something failed hardcore
                     AZ_Assert(entity->GetState() == AZ::Entity::ES_ACTIVE, "Failed to reactivate entity even after scrubbing on component removal");
                 }
+
+                EntityCompositionNotificationBus::Broadcast(&EntityCompositionNotificationBus::Events::OnEntityComponentDisabled, entity->GetId(), componentId);
             }
         }
 
@@ -439,6 +461,8 @@ namespace AzToolsFramework
                         entity->Deactivate();
                     }
 
+                    AZ::ComponentId removedComponentId = componentToRemove->GetId();
+
                     if (RemoveComponentFromEntityAndContainers(entity, componentToRemove))
                     {
                         removedComponents.push_back(componentToRemove);
@@ -456,6 +480,8 @@ namespace AzToolsFramework
                         // If entity is not active now, something failed hardcore
                         AZ_Assert(entity->GetState() == AZ::Entity::ES_ACTIVE, "Failed to reactivate entity even after scrubbing on component removal");
                     }
+
+                    EntityCompositionNotificationBus::Broadcast(&EntityCompositionNotificationBus::Events::OnEntityComponentRemoved, entity->GetId(), removedComponentId);
                 }
 
                 for (auto removedComponent : removedComponents)
@@ -523,12 +549,14 @@ namespace AzToolsFramework
             {
                 if (componentToAddUuid.IsNull())
                 {
-                    return AZ::Failure(AZStd::string::format("Invalid component uuid (%s) provided to AddComponentsToEntities, no components have been added", componentToAddUuid.template ToString<AZStd::string>()));
+                    auto uuidStr = componentToAddUuid.ToString<AZStd::string>();
+                    return AZ::Failure(AZStd::string::format("Invalid component uuid (%s) provided to AddComponentsToEntities, no components have been added", uuidStr.c_str()));
                 }
                 auto componentClassData = GetComponentClassDataForType(componentToAddUuid);
                 if (!componentClassData)
                 {
-                    return AZ::Failure(AZStd::string::format("Invalid class data from uuid (%s) provided to AddComponentsToEntities, no components have been added", componentToAddUuid.template ToString<AZStd::string>()));
+                    auto uuidStr = componentToAddUuid.ToString<AZStd::string>();
+                    return AZ::Failure(AZStd::string::format("Invalid class data from uuid (%s) provided to AddComponentsToEntities, no components have been added", uuidStr.c_str()));
                 }
                 componentsToAddClassData.push_back(componentClassData);
             }
@@ -629,6 +657,8 @@ namespace AzToolsFramework
                 addComponentsResults.m_componentsAdded.push_back(component);
 
                 undo.MarkEntityDirty(entity->GetId());
+
+                EntityCompositionNotificationBus::Broadcast(&EntityCompositionNotificationBus::Events::OnEntityComponentAdded, entity->GetId(), component->GetId());
             }
 
             // Run the scrubber!
@@ -659,10 +689,70 @@ namespace AzToolsFramework
             return AZ::Success(AZStd::move(addComponentsResults));
         }
 
-        EditorEntityActionComponent::ScrubEntityResult EditorEntityActionComponent::ScrubEntity(AZ::Entity* entity)
-        {   
-            ScrubEntityResult result;
-            ScopedUndoBatch undo("Scrub entity");
+        EntityCompositionRequests::ScrubEntitiesOutcome EditorEntityActionComponent::ScrubEntities(const EntityList& entities)
+        {
+            // Optimization Note: We broadcast the entity's ID even if the scrubber will make no changes.
+            // We could avoid doing this by breaking the scrubbing algorithm into
+            // multiple steps, so we detect all entities that need scrubbing
+            // before actually making the changes.
+
+            EntityToScrubEntityResultsMap results;
+
+            // This function is uncommon in that it may need to handle uninitialized entities.
+            // Determine if entities are initialized or not.
+            EntityIdList initializedEntityIds;
+            initializedEntityIds.reserve(entities.size());
+            for (AZ::Entity* entity : entities)
+            {
+                if (entity && entity->GetState() >= AZ::Entity::State::ES_INIT)
+                {
+                    initializedEntityIds.push_back(entity->GetId());
+                }
+            }
+
+            // We only create undo actions and broadcast change-notifications if the entities are initialized.
+            AZStd::unique_ptr<ScopedUndoBatch> undo;
+            if (!initializedEntityIds.empty())
+            {
+                undo.reset(aznew ScopedUndoBatch("Scrubbing entities"));
+
+                EntityCompositionNotificationBus::Broadcast(&EntityCompositionNotificationBus::Events::OnEntityCompositionChanging, initializedEntityIds);
+            }
+
+            // scrub the entities
+            for (AZ::Entity* entity : entities)
+            {
+                if (entity)
+                {
+                    results.emplace(entity->GetId(), ScrubEntity(entity));
+                }
+            }
+
+            if (!initializedEntityIds.empty())
+            {
+                EntityCompositionNotificationBus::Broadcast(&EntityCompositionNotificationBus::Events::OnEntityCompositionChanged, initializedEntityIds);
+            }
+
+            return AZ::Success(AZStd::move(results));
+        }
+
+        EntityCompositionRequests::ScrubEntityResults EditorEntityActionComponent::ScrubEntity(AZ::Entity* entity)
+        {
+            // This function is uncommon in that it may need to handle uninitialized entities.
+            // We should not create undo actions for uninitialized entities,
+            // and we cannot communicate with their components via EBus.
+
+            ScrubEntityResults result;
+
+            // This function is uncommon in that it may need to handle uninitialized entities.
+            bool entityWasIntialized = entity->GetState() >= AZ::Entity::ES_INIT;
+
+            // Cannot undo changes to an entity that hasn't been initialized yet.
+            AZStd::unique_ptr<ScopedUndoBatch> undo;
+            if (entityWasIntialized)
+            {
+                undo.reset(aznew ScopedUndoBatch("Scrub entity"));
+            }
 
             bool entityWasActive = entity->GetState() == AZ::Entity::State::ES_ACTIVE;
             if (entityWasActive)
@@ -670,33 +760,74 @@ namespace AzToolsFramework
                 entity->Deactivate();
             }
 
-            // Components are assumed invalid until proven valid
-            AZ::Entity::ComponentArrayType validComponents;
-            AZ::Entity::ComponentArrayType invalidComponents = entity->GetComponents();
-
-            // Keep looping to add any component that has it's dependencies met
-            // This will keep checking invalid components against more and more valid components
-            // Until we cannot add any further components, which terminates the loop
-            while (AddAnyValidComponentsToList(validComponents, invalidComponents)); // <- Intential semicolon
-
-            // Move invalid components from the entity to the pending queue
-            for (auto invalidComponent : invalidComponents)
+            // Communication with the PendingComposition handler is required.
+            // Create the component if necessary.
+            EditorPendingCompositionRequests* pendingCompositionHandler = GetPendingCompositionHandler(*entity);
+            if (!pendingCompositionHandler)
             {
-                result.m_invalidatedComponents.push_back(invalidComponent);
+                pendingCompositionHandler = entity->CreateComponent<EditorPendingCompositionComponent>();
+                if (undo)
+                {
+                    undo->MarkEntityDirty(entity->GetId());
+                }
+            }
 
-                // Save the component ID since RemoveComponent will reset it
-                auto componentId = invalidComponent->GetId();
+            // If the entity was not activated, then it could possibly have some invalid components added on it that we need to check for
+            // Otherwise we would have already gone through ScrubEntity and asserted/failed. So skip this if we know we were valid on entry.
+            if (!entityWasActive)
+            {
+                AZ::Entity::ComponentArrayType validComponents;
+                AZ::Entity::ComponentArrayType invalidComponents = entity->GetComponents();
 
-                entity->RemoveComponent(invalidComponent);
-                undo.MarkEntityDirty(entity->GetId());
+                // Keep looping to add any component that has it's dependencies met
+                // This will keep checking invalid components against more and more valid components
+                // Until we cannot add any further components, which terminates the loop
+                while (AddAnyValidComponentsToList(validComponents, invalidComponents))
+                {
+                    // this is an intentional empty loop, as we keep going until there are no more valid components and the above
+                    // function returns false.
+                }
 
-                // Restore the component ID and entity*
-                invalidComponent->SetId(componentId);
+                // Move currently invalid components from the entity to the pending queue
+                if (!invalidComponents.empty())
+                {
+                    for (auto invalidComponent : invalidComponents)
+                    {
+                        if (ShouldInspectorShowComponent(invalidComponent))
+                        {
+                            result.m_invalidatedComponents.push_back(invalidComponent);
 
-                GetEditorComponent(invalidComponent)->SetEntity(entity);
+                            // Save the component ID since RemoveComponent will reset it
+                            auto componentId = invalidComponent->GetId();
 
-                // Add the component to the pending list
-                EBUS_EVENT_ID(entity->GetId(), AzToolsFramework::EditorPendingCompositionRequestBus, AddPendingComponent, invalidComponent);
+                            entity->RemoveComponent(invalidComponent);
+
+                            // Restore the component ID and entity*
+                            invalidComponent->SetId(componentId);
+
+                            GetEditorComponent(invalidComponent)->SetEntity(entity);
+
+                            // Add the component to the pending list
+                            pendingCompositionHandler->AddPendingComponent(invalidComponent);
+                        }
+                        else
+                        {
+                            // Delete hidden components.
+                            // Since they're hidden, it's not clear what users could do to resolve the problem.
+                            AZ_Warning("Editor", false,
+                                "Built-in component '%s' from entity '%s' %s was removed during the load/reload/push process.\n"
+                                "This is generally benign, and often results from upgrades of old data that contains duplicate or deprecated components",
+                                GetComponentName(invalidComponent).c_str(), entity->GetName().c_str(), entity->GetId().ToString().c_str());
+                            entity->RemoveComponent(invalidComponent);
+                            delete invalidComponent;
+                        }
+                    }
+
+                    if (undo)
+                    {
+                        undo->MarkEntityDirty(entity->GetId());
+                    }
+                }
             }
 
             // Attempt to add pending components
@@ -706,10 +837,30 @@ namespace AzToolsFramework
                 result.m_validatedComponents.swap(addPendingOutcome.GetValue());
             }
 
+            // See if any of the previously invalid components on the entity are still invalid.
+            // Since we're only checking for an entities' currently owned components that have been invalidated,
+            // we do not mind components that were in the pending set that failed to add.
+            if (!entityWasActive)
+            {
+                for (auto invalidComponentsIter = result.m_invalidatedComponents.begin(); invalidComponentsIter != result.m_invalidatedComponents.end(); )
+                {
+                    auto foundIter = AZStd::find(result.m_validatedComponents.begin(), result.m_validatedComponents.end(), *invalidComponentsIter);
+                    if (foundIter != result.m_validatedComponents.end())
+                    {
+                        invalidComponentsIter = result.m_invalidatedComponents.erase(invalidComponentsIter);
+                    }
+                    else
+                    {
+                        ++invalidComponentsIter;
+                    }
+                }
+            }
+
             if (entityWasActive)
             {
                 entity->Activate();
                 // This should never occur as AddPendingComponentsToEntity guarantees that the operation will succeed.
+                // Any components that would cause this activate to fail should remain in the pending list
                 AZ_Assert(entity->GetState() == AZ::Entity::State::ES_ACTIVE, "Failed to re-activate entity during ScrubEntity.", entity->GetName().c_str());
             }
             return result;
@@ -717,19 +868,46 @@ namespace AzToolsFramework
 
         EditorEntityActionComponent::AddPendingComponentsOutcome EditorEntityActionComponent::AddPendingComponentsToEntity(AZ::Entity* entity)
         {
-            // We ensure our operations should succeed, we do not take care of entity maintenance
-            AZ_Assert(entity->GetState() != AZ::Entity::State::ES_ACTIVE, "AddPendingComponentsToEntity assumes that the calling function is handling entity deactivation/reactivation");
-            ScopedUndoBatch undo("Added pending components to entity");
+            // Note that this function may process entities before they're initialized.
+            // We should not create undo actions for uninitialized entities,
+            // and we cannot communicate with their components via EBus.
+
+            if (!entity)
+            {
+                return AZ::Failure(AZStd::string("Null passed to AddPendingComponentsToEntity, no components have been enabled"));
+            }
+
+            if (entity->GetState() == AZ::Entity::State::ES_ACTIVE)
+            {
+                return AZ::Failure(AZStd::string::format("AddPendingComponentsToEntity cannot run on activated entity '%s' %s. Calling function must handle deactivation/reactivation",
+                    entity->GetName().c_str(), entity->GetId().ToString().c_str()));
+            }
+
+            EditorPendingCompositionRequests* pendingCompositionHandler = GetPendingCompositionHandler(*entity);
+            if (!pendingCompositionHandler)
+            {
+                return AZ::Failure(AZStd::string::format("AddPendingComponentsToEntity cannot run on entity '%s' %s due to it missing the EditorPendingCompositionComponent.",
+                    entity->GetName().c_str(), entity->GetId().ToString().c_str()));
+            }
+
+            bool entityWasIntialized = entity->GetState() >= AZ::Entity::State::ES_INIT;
+
+            // Don't create undo events for uninitialized entities
+            AZStd::unique_ptr<ScopedUndoBatch> undo;
+            if (entityWasIntialized)
+            {
+                undo.reset(aznew ScopedUndoBatch("Added pending components to entity"));
+            }
 
             // Same looping algorithm as the scrubber, but we'll also get the list of added components so we can clean up the pending list if we were successful
             AZStd::vector<AZ::Component*> pendingComponents;
-            AzToolsFramework::EditorPendingCompositionRequestBus::Event(entity->GetId(), &AzToolsFramework::EditorPendingCompositionRequests::GetPendingComponents, pendingComponents);
+            pendingCompositionHandler->GetPendingComponents(pendingComponents);
 
             AZ::Entity::ComponentArrayType addedPendingComponents;
             AZ::Entity::ComponentArrayType currentComponents = entity->GetComponents();
             while (AddAnyValidComponentsToList(currentComponents, pendingComponents, &addedPendingComponents)); // <- Intential semicolon
 
-            if (addedPendingComponents.size())
+            if (!addedPendingComponents.empty())
             {
                 for (auto addedPendingComponent : addedPendingComponents)
                 {
@@ -741,8 +919,13 @@ namespace AzToolsFramework
 
                     if (entity->AddComponent(addedPendingComponent))
                     {
-                        AzToolsFramework::EditorPendingCompositionRequestBus::Event(entity->GetId(), &AzToolsFramework::EditorPendingCompositionRequests::RemovePendingComponent, addedPendingComponent);
+                        pendingCompositionHandler->RemovePendingComponent(addedPendingComponent);
                     }
+                }
+
+                if (undo)
+                {
+                    undo->MarkEntityDirty(entity->GetId());
                 }
             }
 
@@ -816,24 +999,6 @@ namespace AzToolsFramework
         AZStd::string EditorEntityActionComponent::GetComponentName(const AZ::Component* component)
         {
             return GetFriendlyComponentName(component);
-        }
-
-        void EditorEntityActionComponent::OnEntityStreamLoadSuccess()
-        {
-            AZ_PROFILE_FUNCTION(AZ::Debug::ProfileCategory::AzToolsFramework);
-
-            AZ::SliceComponent* rootSlice = nullptr;
-            EBUS_EVENT_RESULT(rootSlice, EditorEntityContextRequestBus, GetEditorRootSlice);
-
-            AZ::SliceComponent::EntityList entitiesLoaded;
-            rootSlice->GetEntities(entitiesLoaded);
-
-            // Validate all loaded entities
-            for (auto& entity : entitiesLoaded)
-            {
-                // Run the scrubber!
-                ScrubEntity(entity);
-            }
         }
 
         void EditorEntityActionComponent::Reflect(AZ::ReflectContext* context)

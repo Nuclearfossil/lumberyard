@@ -89,13 +89,6 @@ namespace Multiplayer
     {
         CryHooksModule::OnCrySystemInitialized(system, systemInitParams);
         m_cvars.RegisterCVars();
-
-        AZ::BehaviorContext* behaviorContext = nullptr;
-        EBUS_EVENT_RESULT(behaviorContext, AZ::ComponentApplicationBus, GetBehaviorContext);
-        if (behaviorContext)
-        {
-            GridMateSystemContext::Reflect(behaviorContext);
-        }
     }
 
     void MultiplayerModule::OnSystemEvent(ESystemEvent event, UINT_PTR wparam, UINT_PTR lparam)
@@ -109,12 +102,13 @@ namespace Multiplayer
             case ESYSTEM_EVENT_GAME_POST_INIT:
             {
 #if BUILD_GAMELIFT_SERVER
-                m_gameLiftListener = aznew GameLiftListener();
+        m_gameLiftListener = aznew GameLiftListener();
 #endif                
-                AZ_Assert(gEnv->pNetwork->GetGridMate(), "No GridMate");
-                GridMate::SessionEventBus::Handler::BusConnect(gEnv->pNetwork->GetGridMate());
-                MultiplayerRequestBus::Handler::BusConnect();
-            }
+        AZ_Assert(gEnv->pNetwork->GetGridMate(), "No GridMate");
+        GridMate::SessionEventBus::Handler::BusConnect(gEnv->pNetwork->GetGridMate());
+        MultiplayerRequestBus::Handler::BusConnect();
+        m_cvars.PostInitRegistration();
+    }
             break;
 
             case ESYSTEM_EVENT_FULL_SHUTDOWN:

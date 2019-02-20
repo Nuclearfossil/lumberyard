@@ -63,7 +63,7 @@ bool CShaderSerialize::_OpenSResource(float fVersion, SSShaderRes* pSR, CShader*
         if (bCheckValid)
         {
             char nameSrc[256];
-            sprintf_s(nameSrc, "%sCryFX/%s.%s", gRenDev->m_cEF.m_ShadersPath, pSH->GetName(), "cfx");
+            sprintf_s(nameSrc, "%sCryFX/%s.%s", gRenDev->m_cEF.m_ShadersPath.c_str(), pSH->GetName(), "cfx");
             uint32 srcCRC = pSH->m_SourceCRC32;
 
             if (!srcCRC)
@@ -148,7 +148,7 @@ bool CShaderSerialize::_OpenSResource(float fVersion, SSShaderRes* pSR, CShader*
 bool CShaderSerialize::OpenSResource(const char* szName,  SSShaderRes* pSR, CShader* pSH, bool bDontUseUserFolder, bool bReadOnly)
 {
     CResFile* rfRO = new CResFile(szName);
-    float fVersion = (float)FX_CACHE_VER + (float)(FX_SER_CACHE_VER);
+    float fVersion = FX_CACHE_VER + FX_SER_CACHE_VER;
     bool bValidRO = _OpenSResource(fVersion, pSR, pSH, bDontUseUserFolder ? CACHE_READONLY : CACHE_USER, rfRO, bReadOnly);
 
     bool bValidUser = false;
@@ -167,7 +167,7 @@ bool CShaderSerialize::OpenSResource(const char* szName,  SSShaderRes* pSR, CSha
 
 bool CShaderSerialize::CreateSResource(CShader* pSH, SSShaderRes* pSR, CCryNameTSCRC& SName, bool bDontUseUserFolder, bool bReadOnly)
 {
-    string dstName;
+    AZStd::string dstName;
     dstName.reserve(512);
 
     if (m_customSerialisePath.size())
@@ -345,7 +345,7 @@ bool CShaderSerialize::ExportShader(CShader* pSH, CShaderManBin& binShaderMgr)
     {
         SSShaderParam PR;
         SShaderParam& P = params.m_PublicParams[i];
-        PR.m_nameIdx = SC.AddString(P.m_Name);
+        PR.m_nameIdx = SC.AddString(P.m_Name.c_str());
         PR.m_Type = P.m_Type;
         PR.m_Value = P.m_Value;
         PR.m_nScriptOffs = SC.AddString(P.m_Script.c_str());
@@ -798,7 +798,7 @@ bool CShaderSerialize::ImportShader(CShader* pSH, CShaderManBin& binShaderMgr)
         SSShaderParam& PR = SC.Params[i];
         SShaderParam P;
         const char* pName = sString(PR.m_nameIdx, SC.Strings);
-        cry_strcpy(P.m_Name, pName);
+        P.m_Name = pName;
         P.m_Type = PR.m_Type;
         P.m_Value = PR.m_Value;
         P.m_Script = sString(PR.m_nScriptOffs, SC.Strings);

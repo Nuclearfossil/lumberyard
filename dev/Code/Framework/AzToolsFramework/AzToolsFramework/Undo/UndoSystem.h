@@ -16,7 +16,7 @@
 #include <AzCore/Memory/SystemAllocator.h>
 #include <AzCore/RTTI/RTTI.h>
 #include <AzCore/EBus/EBus.h>
-#include <AzCore/std/containers/ring_buffer.h>
+#include <AzCore/std/containers/vector.h>
 #include <AzCore/std/string/string.h>
 
 #pragma once
@@ -25,6 +25,8 @@ namespace AzToolsFramework
 {
     namespace UndoSystem
     {
+        class UndoStack;
+
         typedef AZ::u64 URCommandID;
 
         // plug one of these into your undo stack if you'd like notification.
@@ -71,10 +73,11 @@ namespace AzToolsFramework
             virtual void Redo();
 
             /**
-            Usage:  override with class specific change comparison between undo/redo state
-            default to false
+            Usage: override with class specific change comparison between undo/redo state.
+            This allows the undo system to remove commands that have no actual effect
+            (Eg: a command that changes a value from 5 to 5 has no effect and can be removed)
             */
-            virtual bool Changed() const { return false; }
+            virtual bool Changed() const = 0;
 
             /**
             Usage: return the first command in the parent/child tree with a matching id
@@ -84,10 +87,10 @@ namespace AzToolsFramework
 
             void SetName(const AZStd::string& friendlyName);
             AZStd::string& GetName();
-            
+
             void SetParent(URSequencePoint* parent);
             URSequencePoint* GetParent() const { return m_parent; }
-            
+
             const ChildVec& GetChildren() const { return m_children; }
             bool HasRealChildren() const;
 
@@ -106,7 +109,7 @@ namespace AzToolsFramework
             bool operator==(const URCommandID id) const { return m_id == 0 ? false : m_id == id; }
             bool operator==(const URSequencePoint* com) const { return *this == com->m_id; }
 
-            friend class UndoStack;
+            friend UndoStack;
 
         protected:
             void AddChild(URSequencePoint*);
@@ -119,6 +122,26 @@ namespace AzToolsFramework
             bool m_isPosted;
         };
 
+        /**
+         * Used by batch undo commands for dummy/batch/parent nodes where we 
+         * know nothing will have changed.
+         */
+        class BatchCommand
+            : public URSequencePoint
+        {
+        public:
+            AZ_RTTI(BatchCommand, "{3CA8855C-C6A5-4395-9B47-D3F5A13EFB2D}", URSequencePoint)
+            AZ_CLASS_ALLOCATOR(BatchCommand, AZ::SystemAllocator, 0)
+
+            explicit BatchCommand(const AZStd::string& friendlyName, URCommandID id = 0)
+                : URSequencePoint(friendlyName, id) {}
+
+            explicit BatchCommand(URCommandID id)
+                : URSequencePoint(id) {}
+
+            bool Changed() const override { return false; }
+        };
+
         //--------------------------------------------------------------------
 
         class UndoStack
@@ -127,7 +150,8 @@ namespace AzToolsFramework
 
             AZ_CLASS_ALLOCATOR(UndoStack, AZ::SystemAllocator, 0);
 
-            UndoStack(int limit, IUndoNotify* notify);
+            UndoStack(IUndoNotify* notify);
+            UndoStack(int /*no longer used*/, IUndoNotify* notify);
             ~UndoStack();
 
             URSequencePoint* Post(URSequencePoint*);
@@ -172,7 +196,7 @@ namespace AzToolsFramework
             int m_Cursor;
             int m_CleanPoint;
 
-            typedef AZStd::ring_buffer<URSequencePoint*> SequencePointBuffer;
+            typedef AZStd::vector<URSequencePoint*> SequencePointBuffer;
 
             SequencePointBuffer m_SequencePointsBuffer;
             IUndoNotify* m_notify;

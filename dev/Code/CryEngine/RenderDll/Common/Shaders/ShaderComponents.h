@@ -11,12 +11,14 @@
 */
 // Original file Copyright Crytek GMBH or its affiliates, used under license.
 
-#ifndef __SHADERCOMPONENTS_H__
-#define __SHADERCOMPONENTS_H__
+#pragma once
 
 #include "../Defs.h"
 #include "ShadersResourcesGroups/PerFrame.h"
 
+#if defined(AZ_RESTRICTED_PLATFORM)
+#include AZ_RESTRICTED_FILE(ShaderComponents_h, AZ_RESTRICTED_PLATFORM)
+#endif
 
 #if defined(PF_LOCAL) && !(PF_LOCAL == 1)
 // e.g.: In Mac OS X it is defined in a system header
@@ -490,8 +492,6 @@ struct SCGTexture : SCGBind
             sp.m_BindingSlot == m_BindingSlot &&
             sp.m_Flags == m_Flags &&
             sp.m_pAnimInfo == m_pAnimInfo &&
-            sp.m_pTexture == m_pTexture &&
-            sp.m_eCGTextureType == m_eCGTextureType &&
             sp.m_bSRGBLookup == m_bSRGBLookup &&
             sp.m_bGlobal == m_bGlobal)
         {
@@ -512,6 +512,3 @@ struct SCGTexture : SCGBind
     {
     }
 };
-
-#endif
-

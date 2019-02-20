@@ -53,8 +53,7 @@ namespace TestNodes
     class ContractNode : public ScriptCanvas::Node
     {
     public:
-        AZ_CLASS_ALLOCATOR(ContractNode, AZ::SystemAllocator, 0);
-        AZ_RTTI(ContractNode, "{76A17F4F-F508-4C20-83A0-0125468946C7}", ScriptCanvas::Node);
+        AZ_COMPONENT(ContractNode, "{76A17F4F-F508-4C20-83A0-0125468946C7}", ScriptCanvas::Node);
         static void Reflect(AZ::ReflectContext* reflection);
 
         void OnInit() override;
@@ -145,5 +144,23 @@ namespace TestNodes
 
     private:
         ScriptCanvas::SlotId m_resultSlotId;
+    };
+
+    //////////////////////////////////////////////////////////////////////////////
+    class InsertSlotConcatNode
+        : public ScriptCanvas::Node
+    {
+    public:
+        AZ_COMPONENT(InsertSlotConcatNode, "{445313E7-D0A5-4D73-B674-6FA37EFFF5C8}", ScriptCanvas::Node);
+
+        static void Reflect(AZ::ReflectContext* reflection);
+        ScriptCanvas::SlotId InsertSlot(AZ::s64 index, AZStd::string_view slotName);
+
+    protected:
+        void OnInputSignal(const ScriptCanvas::SlotId& slotId) override;
+
+        void OnInit() override;
+
+        void Visit(ScriptCanvas::NodeVisitor& visitor) const override { visitor.Visit(*this); }
     };
 }

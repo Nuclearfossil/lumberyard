@@ -30,6 +30,8 @@ class CObjectPhysicsManager;
 class CViewport;
 struct HitContext;
 enum class ImageRotationDegrees;
+struct ICharacterInstance;
+struct IStatObj;
 
 #include "ObjectEvent.h"
 
@@ -66,8 +68,8 @@ public:
     //! This callback will be called on response to object event.
     typedef Functor2<CBaseObject*, int> EventCallback;
 
-    virtual CBaseObject* NewObject(CObjectClassDesc* cls, CBaseObject* prev = 0, const QString& file = "") = 0;
-    virtual CBaseObject* NewObject(const QString& typeName, CBaseObject* prev = 0, const QString& file = "") = 0;
+    virtual CBaseObject* NewObject(CObjectClassDesc* cls, CBaseObject* prev = 0, const QString& file = "", const char* newObjectName = nullptr) = 0;
+    virtual CBaseObject* NewObject(const QString& typeName, CBaseObject* prev = 0, const QString& file = "", const char* newObjectName = nullptr) = 0;
     virtual CBaseObject* NewObject(CObjectArchive& archive, CBaseObject* pUndoObject = 0, bool bMakeNewId = false) = 0;
 
     virtual void DeleteObject(CBaseObject* obj) = 0;
@@ -106,6 +108,10 @@ public:
     //! Check intersection with an object.
     //! @return true if hit, and fills hitInfo structure.
     virtual bool HitTestObject(CBaseObject* obj, HitContext& hc) = 0;
+
+    //! Gets a radius to be used for hit tests on the axis helpers, like the transform gizmo.
+    //! @return the axis helper hit radius.
+    virtual int GetAxisHelperHitRadius() const = 0;
 
     //! Send event to all objects.
     //! Will cause OnEvent handler to be called on all objects.

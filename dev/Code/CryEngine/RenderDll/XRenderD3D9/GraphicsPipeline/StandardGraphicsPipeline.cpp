@@ -26,8 +26,9 @@
 #include "Common/Textures/TextureHelpers.h"
 #include "Common/Include_HLSL_CPP_Shared.h"
 #include "MultiLayerAlphaBlendPass.h"
+
 #if defined(FEATURE_SVO_GI)
-#include "D3D_SVO.h"
+    #include "D3D_SVO.h"
 #endif
 
 #include "DriverD3D.h" //for gcpRendD3D
@@ -153,7 +154,8 @@ void CStandardGraphicsPipeline::UpdatePerFrameConstantBuffer(const PerFrameParam
 #endif
 
     const float time = CRenderer::GetRealTime();
-    cb->PerFrame_Time = Vec4(time, CRenderer::GetElapsedTime(), time - CRenderer::GetElapsedTime(), 0.0f);
+
+    cb->PerFrame_Time = Vec4(time, CRenderer::GetElapsedTime(), time - CRenderer::GetElapsedTime(), perFrameParams.m_MidDayIndicator );
 
     const SRenderLight* sunLight = FindSunLight(renderer->m_RP);
     if (sunLight)
@@ -394,7 +396,7 @@ void CStandardGraphicsPipeline::UpdatePerShadowConstantBuffer(const ShadowParame
         shadowFrustum.fNearDist,
         shadowFrustum.m_eFrustumType != ShadowMapFrustum::e_HeightMapAO ? shadowFrustum.fFarDist : 1.f,
         0.0f,
-        shadowFrustum.fDepthTestBias);
+        0.0f);
     cb->PerShadow_LightPos = Vec4(params.m_ShadowFrustum->vLightSrcRelPos + params.m_ShadowFrustum->vProjTranslation, 0);
     cb->PerShadow_ViewPos = Vec4(params.m_ViewerPos, 0);
 

@@ -28,3 +28,15 @@ def build(bld):
 
         cxxflags = [ '-x', 'objective-c++' ],
     )
+
+
+def package(pkg):
+    build(pkg) # Need to execute this to generate our task_generator...
+    pkg.package_game(
+        target                      = '{}Launcher'.format(pkg.project),
+        task_gen_name               = '{}MacLauncher'.format(pkg.project),
+        platforms                   = ['darwin'],
+        configurations              = ['debug', 'profile', 'performance', 'release'],
+        include_assets              = True,
+        include_spec_dependencies   = True,
+    )

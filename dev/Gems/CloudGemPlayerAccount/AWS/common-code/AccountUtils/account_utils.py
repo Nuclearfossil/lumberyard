@@ -60,7 +60,7 @@ def get_user_pool_id():
     return pool_id
 
 def get_identity_pool_id():
-    identity_pool_id = CloudCanvas.get_setting('CloudCanvas::IdentityPool')
+    identity_pool_id = CloudCanvas.get_setting('CloudCanvasIdentityPool')
     if identity_pool_id:
         return identity_pool_id
 
@@ -69,12 +69,12 @@ def get_identity_pool_id():
         # Currently we invoke a service api lambda directly.
         lambda_client = boto3.client('lambda')
         response = lambda_client.invoke(
-            FunctionName = CloudCanvas.get_setting('CloudCanvas::ServiceLambda'),
+            FunctionName = CloudCanvas.get_setting('CloudCanvasServiceLambda'),
             Payload = json.dumps({
                 'function': 'get_deployment_access_resource_info',
                 'module': 'resource_info',
                 'parameters': {
-                    'deployment_name': CloudCanvas.get_setting('CloudCanvas::DeploymentName'),
+                    'deployment_name': CloudCanvas.get_setting('CloudCanvasDeploymentName'),
                     'resource_name': 'PlayerAccessIdentityPool'
                 }
             })
@@ -107,6 +107,21 @@ def get_account_for_identity(cognitoIdentityId):
         return items[0]
     if len(items) > 1:
         print 'Warning: More than one account found for {}'.format(cognitoIdentityId)
+        return items[0]
+    return None
+
+def get_account_for_user_name(username):
+    response = get_account_table().query(
+        ConsistentRead=False,
+        IndexName='CognitoUsernameIndex',
+        KeyConditionExpression=Key('CognitoUsername').eq(username),
+        Limit=2
+    )
+    items = response.get('Items', [])
+    if len(items) == 1:
+        return items[0]
+    if len(items) > 1:
+        print 'Warning: More than one account found for {}'.format(username)
         return items[0]
     return None
 

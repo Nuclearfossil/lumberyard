@@ -21,7 +21,11 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QDir>
+
+#ifdef DEPRECATED_QML_SUPPORT
 #include <QQmlEngine>
+#endif
+
 #include <QDebug>
 #include "../Plugins/EditorUI_QT/UIFactory.h"
 #include <AzQtComponents/Components/LumberyardStylesheet.h>
@@ -42,10 +46,6 @@
 #include <AzCore/UserSettings/UserSettings.h>
 #include <AzCore/Component/ComponentApplicationBus.h>
 #include <AzCore/IO/SystemFile.h>
-#include <AzCore/Component/Entity.h>
-#include <AzToolsFramework/Thumbnails/ThumbnailerComponent.h>
-#include <AzToolsFramework/AssetBrowser/AssetBrowserComponent.h>
-#include <AzToolsFramework/MaterialBrowser/MaterialBrowserComponent.h>
 
 #if defined(AZ_PLATFORM_WINDOWS)
 #   include <AzFramework/Input/Buses/Notifications/RawInputNotificationBus_win.h>
@@ -57,13 +57,18 @@ enum
     GameModeIdleFrequency = 0,
     EditorModeIdleFrequency = 1,
     InactiveModeFrequency = 10,
+    UninitializedFrequency = 9999,
 };
+
+#ifdef DEPRECATED_QML_SUPPORT
 
 // QML imports that go in the editor folder (relative to the project root)
 #define QML_IMPORT_USER_LIB_PATH "Editor/UI/qml"
 
 // QML Imports that are part of Qt (relative to the executable)
 #define QML_IMPORT_SYSTEM_LIB_PATH "qtlibs/qml"
+
+#endif // #ifdef DEPRECATED_QML_SUPPORT
 
 Q_LOGGING_CATEGORY(InputDebugging, "lumberyard.editor.input")
 
@@ -102,10 +107,10 @@ namespace
         : public QObject
     {
     public:
-        GlobalEventFilter(QObject* watch)
+        explicit GlobalEventFilter(QObject* watch)
             : QObject(watch) {}
 
-        bool eventFilter(QObject* obj, QEvent* e)
+        bool eventFilter(QObject* obj, QEvent* e) override
         {
             static bool recursionChecker = false;
             RecursionGuard guard(recursionChecker);
@@ -154,6 +159,28 @@ namespace
                     {
                         return true;
                     }
+                }
+                break;
+
+                case QEvent::MouseButtonPress:
+                case QEvent::MouseButtonRelease:
+                case QEvent::MouseButtonDblClick:
+                case QEvent::MouseMove:
+                {
+#ifdef AZ_PLATFORM_APPLE
+                    auto widget = qobject_cast<QWidget*>(obj);
+                    if (widget && widget->graphicsProxyWidget() != nullptr)
+                    {
+                        QMouseEvent* me = static_cast<QMouseEvent*>(e);
+                        QWidget* target = qApp->widgetAt(QCursor::pos());
+                        if (target)
+                        {
+                            QMouseEvent ev(me->type(), target->mapFromGlobal(QCursor::pos()), me->button(), me->buttons(), me->modifiers());
+                            qApp->notify(target, &ev);
+                            return true;
+                        }
+                    }
+#endif
                 }
                 break;
             }
@@ -205,8 +232,9 @@ namespace Editor
         , m_inWinEventFilter(false)
         , m_stylesheet(new AzQtComponents::LumberyardStylesheet(this))
         , m_idleTimer(new QTimer(this))
-        , m_qtEntity(nullptr)
     {
+        m_idleTimer->setInterval(UninitializedFrequency);
+
         setWindowIcon(QIcon(":/Application/res/editor_icon.ico"));
 
         // set the default key store for our preferences:
@@ -216,9 +244,7 @@ namespace Editor
 
         connect(m_idleTimer, &QTimer::timeout, this, &EditorQtApplication::maybeProcessIdle);
 
-        connect(this, &QGuiApplication::applicationStateChanged, [this]() {
-            ResetIdleTimer(GetIEditor() ? GetIEditor()->IsInGameMode() : true);
-        });
+        connect(this, &QGuiApplication::applicationStateChanged, this, [this] { ResetIdleTimerInterval(PollState); });
         installEventFilter(this);
 
         // Disable our debugging input helpers by default
@@ -236,7 +262,10 @@ namespace Editor
 
         // install hooks and filters last and revoke them first
         InstallFilters();
+
+#ifdef DEPRECATED_QML_SUPPORT
         InitializeQML();
+#endif // #ifdef DEPRECATED_QML_SUPPORT
 
         // install this filter. It will be a parent of the application and cleaned up when it is cleaned up automically
         auto globalEventFilter = new GlobalEventFilter(this);
@@ -244,24 +273,6 @@ namespace Editor
 
         //Setup reusable dialogs
         UIFactory::Initialize();
-
-        InitQtEntity();
-    }
-
-    void EditorQtApplication::InitQtEntity()
-    {
-        AzToolsFramework::Thumbnailer::ThumbnailerComponent::CreateDescriptor();
-        AzToolsFramework::AssetBrowser::AssetBrowserComponent::CreateDescriptor();
-        AzToolsFramework::MaterialBrowser::MaterialBrowserComponent::CreateDescriptor();
-
-        m_qtEntity.reset(aznew AZ::Entity());
-
-        m_qtEntity->AddComponent(aznew AzToolsFramework::Thumbnailer::ThumbnailerComponent());
-        m_qtEntity->AddComponent(aznew AzToolsFramework::AssetBrowser::AssetBrowserComponent());
-        m_qtEntity->AddComponent(aznew AzToolsFramework::MaterialBrowser::MaterialBrowserComponent());
-
-        m_qtEntity->Init();
-        m_qtEntity->Activate();
     }
 
     void EditorQtApplication::LoadSettings() 
@@ -325,31 +336,60 @@ namespace Editor
 
     EditorQtApplication::~EditorQtApplication()
     {
-        GetIEditor()->UnregisterNotifyListener(this);
+        if (GetIEditor())
+        {
+            GetIEditor()->UnregisterNotifyListener(this);
+        }
 
         //Clean reusable dialogs
         UIFactory::Deinitialize();
 
+#ifdef DEPRECATED_QML_SUPPORT
         UninitializeQML();
+#endif // #ifdef DEPRECATED_QML_SUPPORT
+
         UninstallFilters();
 
         UninstallEditorTranslators();
     }
 
-#ifdef _DEBUG
+#ifdef AZ_DEBUG_BUILD
+    static QString objectParentsToString(QObject* obj)
+    {
+        QString result;
+        if (obj)
+        {
+            QDebug stream(&result);
+            QObject* p = obj->parent();
+            while (p)
+            {
+                stream << p << ":";
+                p = p->parent();
+            }
+        }
+        return result;
+    }
+
     bool EditorQtApplication::notify(QObject* receiver, QEvent* ev)
     {
-        if (ev->type() == QEvent::MouseButtonPress || ev->type() == QEvent::KeyPress)
+        /*
+        QEvent::Type evType = ev->type();
+        if (evType == QEvent::MouseButtonPress ||
+                evType == QEvent::KeyPress ||
+                evType == QEvent::Shortcut ||
+                evType == QEvent::ShortcutOverride ||
+                evType == QEvent::KeyPress ||
+                evType == QEvent::KeyRelease)
         {
-            qCDebug(InputDebugging) << "Event" << ev->type() << "delivered to" << receiver << "preaccepted=" << ev->isAccepted();
+            qCDebug(InputDebugging) << "Attempting to deliver" << evType << "to" << receiver << "; receiver's parents=(" << objectParentsToString(receiver) << "); pre-accepted=" << ev->isAccepted();
             bool processed = QApplication::notify(receiver, ev);
-            qCDebug(InputDebugging) << "processed=" << processed << "; accepted=" << ev->isAccepted()
-                << "focusWidget=" << focusWidget();
+            qCDebug(InputDebugging) << "    processed=" << processed << "; accepted=" << ev->isAccepted()
+                                    << "focusWidget=" << focusWidget();
 
             if (QWidget::mouseGrabber() || QWidget::keyboardGrabber())
             {
                 qCDebug(InputDebugging) << "Mouse Grabber=" << QWidget::mouseGrabber()
-                    << "; Key Grabber=" << QWidget::keyboardGrabber();
+                                        << "; Key Grabber=" << QWidget::keyboardGrabber();
             }
 
             if (QWidget* popup = QApplication::activePopupWidget())
@@ -364,10 +404,11 @@ namespace Editor
 
             return processed;
         }
+        */
 
         return QApplication::notify(receiver, ev);
     }
-#endif
+#endif // #ifdef AZ_DEBUG_BUILD
 
     static QWindow* windowForWidget(const QWidget* widget)
     {
@@ -408,8 +449,8 @@ namespace Editor
             const UINT rawInputHeaderSize = sizeof(RAWINPUTHEADER);
             GetRawInputData((HRAWINPUT)msg->lParam, RID_INPUT, NULL, &rawInputSize, rawInputHeaderSize);
 
-            LPBYTE rawInputBytes = new BYTE[rawInputSize];
-            CRY_ASSERT(rawInputBytes);
+            AZStd::array<BYTE, sizeof(RAWINPUT)> rawInputBytesArray;
+            LPBYTE rawInputBytes = rawInputBytesArray.data();
 
             const UINT bytesCopied = GetRawInputData((HRAWINPUT)msg->lParam, RID_INPUT, rawInputBytes, &rawInputSize, rawInputHeaderSize);
             CRY_ASSERT(bytesCopied == rawInputSize);
@@ -418,6 +459,7 @@ namespace Editor
             CRY_ASSERT(rawInput);
 
             AzFramework::RawInputNotificationBusWin::Broadcast(&AzFramework::RawInputNotificationsWin::OnRawInputEvent, *rawInput);
+
             return false;
         }
         else if (msg->message == WM_DEVICECHANGE)
@@ -446,12 +488,12 @@ namespace Editor
                 GetIEditor()->UnregisterNotifyListener(this);
             break;
 
-            case eNotify_OnEndGameMode:
-                ResetIdleTimer(false);
-            break;
-
             case eNotify_OnBeginGameMode:
-                ResetIdleTimer(true);
+                // GetIEditor()->IsInGameMode() Isn't reliable when called from within the notification handler
+                ResetIdleTimerInterval(GameMode);
+            break;
+            case eNotify_OnEndGameMode:
+                ResetIdleTimerInterval(EditorMode);
             break;
         }
     }
@@ -494,6 +536,7 @@ namespace Editor
         m_stylesheet->Refresh(this);
     }
 
+#ifdef DEPRECATED_QML_SUPPORT
     void EditorQtApplication::InitializeQML()
     {
         if (!m_qmlEngine)
@@ -526,6 +569,7 @@ namespace Editor
             m_qmlEngine = nullptr;
         }
     }
+#endif // #ifdef DEPRECATED_QML_SUPPORT
 
     void EditorQtApplication::setIsMovingOrResizing(bool isMovingOrResizing)
     {
@@ -535,6 +579,11 @@ namespace Editor
         }
 
         m_isMovingOrResizing = isMovingOrResizing;
+    }
+
+    bool EditorQtApplication::isMovingOrResizing() const
+    {
+        return m_isMovingOrResizing;
     }
 
     void EditorQtApplication::EnableUI2(bool enable)
@@ -547,10 +596,12 @@ namespace Editor
         return m_stylesheet->GetColorByName(name);
     }
 
+#ifdef DEPRECATED_QML_SUPPORT
     QQmlEngine* EditorQtApplication::GetQMLEngine() const
     {
         return m_qmlEngine;
     }
+#endif // #ifdef DEPRECATED_QML_SUPPORT
 
     EditorQtApplication* EditorQtApplication::instance()
     {
@@ -597,6 +648,11 @@ namespace Editor
     {
         if (enable)
         {
+            if (m_idleTimer->interval() == UninitializedFrequency)
+            {
+                ResetIdleTimerInterval();
+            }
+
             m_idleTimer->start();
         }
         else
@@ -605,24 +661,30 @@ namespace Editor
         }
     }
 
-    void EditorQtApplication::ResetIdleTimer(bool isInGameMode)
+    void EditorQtApplication::ResetIdleTimerInterval(TimerResetFlag flag)
     {
-        bool isActive = true;
-
-        int timerFrequency = InactiveModeFrequency;
-
-        if (isActive)
+        bool isInGameMode = flag == GameMode;
+        if (flag == PollState)
         {
-            if (isInGameMode)
+            isInGameMode = GetIEditor() ? GetIEditor()->IsInGameMode() : false;
+        }
+
+        // Game mode takes precedence over anything else
+        if (isInGameMode)
+        {
+            m_idleTimer->setInterval(GameModeIdleFrequency);
+        }
+        else
+        {
+            if (applicationState() & Qt::ApplicationActive)
             {
-                timerFrequency = GameModeIdleFrequency;
+                m_idleTimer->setInterval(EditorModeIdleFrequency);
             }
             else
             {
-                timerFrequency = EditorModeIdleFrequency;
+                m_idleTimer->setInterval(InactiveModeFrequency);
             }
         }
-        EnableOnIdle(isActive);
     }
 
     bool EditorQtApplication::eventFilter(QObject* object, QEvent* event)

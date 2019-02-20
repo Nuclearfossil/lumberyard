@@ -311,9 +311,9 @@ ITimeOfDay* C3DEngine::GetTimeOfDay()
 }
 
 ///////////////////////////////////////////////////////////////////////////////
-void C3DEngine::TraceFogVolumes(const Vec3& worldPos, ColorF& fogVolumeContrib, const SRenderingPassInfo& passInfo)
+void C3DEngine::TraceFogVolumes(const Vec3& vPos, const AABB& objBBox, SFogVolumeData& fogVolData, const SRenderingPassInfo& passInfo, bool fogVolumeShadingQuality)
 {
-    CFogVolumeRenderNode::TraceFogVolumes(worldPos, fogVolumeContrib, passInfo);
+    CFogVolumeRenderNode::TraceFogVolumes(vPos, objBBox, fogVolData, passInfo, fogVolumeShadingQuality);
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -413,6 +413,8 @@ void C3DEngine::AsyncOctreeUpdate(IRenderNode* pEnt, int nSID, int nSIDConsidere
 
     pEnt->m_fWSMaxViewDist = pEnt->GetMaxViewDist();
 
+    bool useVisAreas = true;
+
     if (eERType != eERType_Light)
     {
         if (fObjRadiusSqr > sqr(MAX_VALID_OBJECT_VOLUME) || !_finite(fObjRadiusSqr))
@@ -434,6 +436,11 @@ void C3DEngine::AsyncOctreeUpdate(IRenderNode* pEnt, int nSID, int nSIDConsidere
                 return;
             }
         }
+
+        if (pEnt->m_dwRndFlags & ERF_OUTDOORONLY)
+        {
+            useVisAreas = false;
+        }
     }
     else
     {
@@ -447,6 +454,11 @@ void C3DEngine::AsyncOctreeUpdate(IRenderNode* pEnt, int nSID, int nSIDConsidere
             {
                 m_lstAlwaysVisible.Add(pEnt);
             }
+        }
+
+        if (lightFlag & DLF_IGNORES_VISAREAS)
+        {
+            useVisAreas = false;
         }
     }
 
@@ -464,7 +476,7 @@ void C3DEngine::AsyncOctreeUpdate(IRenderNode* pEnt, int nSID, int nSIDConsidere
         }
     }
     //////////////////////////////////////////////////////////////////////////
-    if (pEnt->m_dwRndFlags & ERF_OUTDOORONLY || !(m_pVisAreaManager && m_pVisAreaManager->SetEntityArea(pEnt, aabb, fObjRadiusSqr)))
+    if (!useVisAreas || !(m_pVisAreaManager && m_pVisAreaManager->SetEntityArea(pEnt, aabb, fObjRadiusSqr)))
     {
         if (m_pObjectsTree == nullptr)
         {

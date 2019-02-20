@@ -27,7 +27,10 @@
 #include <AzFramework/StringFunc/StringFunc.h>
 #include <AzToolsFramework/Asset/AssetProcessorMessages.h>
 #include <AzToolsFramework/Asset/AssetSystemComponent.h>
+
+#if !defined(BATCH_MODE)
 #include <AzToolsFramework/UI/Logging/LogPanel_Panel.h>
+#endif
 
 #include "native/utilities/assetUtils.h"
 #include "native/utilities/ApplicationManagerAPI.h"
@@ -41,21 +44,25 @@
 #include <QFileInfo>
 #include <QTranslator>
 #include <QByteArray>
-#include <QCommandlineparser>
-#include <QCommandlineoption>
+#include <QCommandLineParser>
+#include <QCommandLineOption>
 
-#include <QMessageBox>
 #include <QSettings>
+
+#if !defined(BATCH_MODE)
+#include <QMessageBox>
 #include <QDialogButtonBox>
 #include <QLabel>
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QPushButton>
+#endif
 
 #include <string.h> // for base  strcpy
 #include <AzFramework/Asset/AssetCatalogComponent.h>
 #include <AzToolsFramework/ToolsComponents/ToolsAssetCatalogComponent.h>
 #include <AzToolsFramework/ToolsComponents/GenericComponentWrapper.h>
+#include <AzToolsFramework/AssetBrowser/AssetBrowserComponent.h>
 #include <LyShine/UiAssetTypes.h>
 
 namespace AssetProcessor
@@ -158,6 +165,7 @@ void AssetProcessorAZApplication::RegisterCoreComponents()
 
     RegisterComponentDescriptor(AssetProcessor::ToolsAssetCatalogComponent::CreateDescriptor());
     RegisterComponentDescriptor(AzToolsFramework::Components::GenericComponentUnwrapper::CreateDescriptor());
+    RegisterComponentDescriptor(AzToolsFramework::AssetBrowser::AssetBrowserComponent::CreateDescriptor());
 }
 
 void AssetProcessorAZApplication::ResolveModulePath(AZ::OSString& modulePath)
@@ -423,96 +431,25 @@ void ApplicationManager::CheckQuit()
 
 void ApplicationManager::CheckForUpdate()
 {
-    bool tryRestart = false;
-    int count = 0;
     for (int idx = 0; idx < m_appDependencies.size(); ++idx)
     {
         ApplicationDependencyInfo* fileDependencyInfo = m_appDependencies[idx];
         QString fileName = fileDependencyInfo->FileName();
-        QFile file(fileName);
-        if (file.exists())
+        QFileInfo fileInfo(fileName);
+        if (fileInfo.exists())
         {
-            fileDependencyInfo->SetWasPresentEver();
-            count++; // keeps track of how many files we have found
-
-            QFileInfo fileInfo(fileName);
             QDateTime fileLastModifiedTime = fileInfo.lastModified();
             bool hasTimestampChanged = (fileDependencyInfo->Timestamp() != fileLastModifiedTime);
-            if (!fileDependencyInfo->IsModified())
+            if (hasTimestampChanged)
             {
-                //if file is not reported as modified earlier
-                //we check to see whether it is modified now
-                if (hasTimestampChanged)
-                {
-                    fileDependencyInfo->SetTimestamp(fileLastModifiedTime);
-                    fileDependencyInfo->SetIsModified(true);
-                    fileDependencyInfo->SetStillUpdating(true);
-                }
-            }
-            else
-            {
-                // if the file has been reported to have modified once
-                //we check to see whether it is still changing
-                if (hasTimestampChanged)
-                {
-                    fileDependencyInfo->SetTimestamp(fileLastModifiedTime);
-                    fileDependencyInfo->SetStillUpdating(true);
-                }
-                else
-                {
-                    fileDependencyInfo->SetStillUpdating(false);
-                    tryRestart = true;
-                }
+                QuitRequested();
             }
         }
         else
         {
-            // if one of the files is not present or is deleted we construct a null datetime for it and
+            // if one of the files is not present we construct a null datetime for it and
             // continue checking
-
-            if (!fileDependencyInfo->WasPresentEver())
-            {
-                // if it never existed in the first place, its okay to restart!
-                // however, if it suddenly appears later or it disappears after it was there, it is relevant
-                // and we need to wait for it to come back.
-                ++count;
-            }
-            else
-            {
-                fileDependencyInfo->SetTimestamp(QDateTime());
-                fileDependencyInfo->SetIsModified(true);
-                fileDependencyInfo->SetStillUpdating(true);
-            }
-        }
-    }
-
-    if (tryRestart && count == m_appDependencies.size())
-    {
-        //we only check here if one file after getting modified is not getting changed any longer
-        tryRestart = false;
-        count = 0;
-        for (int idx = 0; idx < m_appDependencies.size(); ++idx)
-        {
-            ApplicationDependencyInfo* fileDependencyInfo = m_appDependencies[idx];
-            if (fileDependencyInfo->IsModified() && !fileDependencyInfo->StillUpdating())
-            {
-                //all those files which have modified and are not changing any longer
-                count++;
-            }
-            else if (!fileDependencyInfo->IsModified())
-            {
-                //files that are not modified
-                count++;
-            }
-        }
-
-        if (count == m_appDependencies.size())
-        {
-            AZ_TracePrintf(AssetProcessor::ConsoleChannel, "All dependencies accounted for.\n");
-
-            //We will reach here only if all the modified files are not changing
-            //we can now stop the timer and request exit
-            Restart();
+            fileDependencyInfo->SetTimestamp(QDateTime());
         }
     }
 }
@@ -527,6 +464,19 @@ void ApplicationManager::PopulateApplicationDependencies()
     QString applicationPath = QCoreApplication::applicationFilePath();
 
     m_filesOfInterest.push_back(applicationPath);
+
+    // add some known-dependent files (this can be removed when they are no longer a dependency)
+    // Note that its not necessary for any of these files to actually exist.  It is considered a "change" if they 
+    // change their file modtime, or if they go from existing to not existing, or if they go from not existing, to existing.
+    // any of those should cause AP to drop.
+    for (const QString& pathName : { "CrySystem", "CryAction", "SceneCore", 
+                                     "SceneData", "FbxSceneBuilder", "AzQtComponents", 
+                                     "LyIdentity_shared", "LyMetricsProducer_shared", "LyMetricsShared_shared" 
+                                     })
+    {
+        QString pathWithPlatformExtension = pathName + QString(AZ_DYNAMIC_LIBRARY_EXTENSION);
+        m_filesOfInterest.push_back(dir.absoluteFilePath(pathWithPlatformExtension));
+    }
 
     // Get the external builder modules to add to the files of interest
     QStringList builderModuleFileList;
@@ -609,10 +559,12 @@ bool ApplicationManager::StartAZFramework(QString appRootOverride)
     //Registering all the Components
     m_frameworkApp.RegisterComponentDescriptor(AzFramework::LogComponent::CreateDescriptor());
  
+#if !defined(BATCH_MODE)
     AZ::SerializeContext* context;
     EBUS_EVENT_RESULT(context, AZ::ComponentApplicationBus, GetSerializeContext);
     AZ_Assert(context, "No serialize context");
     AzToolsFramework::LogPanel::BaseLogPanel::Reflect(context);
+#endif
     
     // the log folder currently goes in the bin folder:
     AZStd::string fullBinFolder;
@@ -924,7 +876,7 @@ ApplicationManager::RegistryCheckInstructions ApplicationManager::CheckForRegist
                 "4) Delete the key for %1\n"
                 "5) %2"
             ).arg(compatibilityRegistryGroupName, windowsFriendlyRegPath);
-
+#if !defined(BATCH_MODE)
             if (showPopupMessage)
             {
                 warningText = warningText.arg(tr("Click the Restart button"));
@@ -965,6 +917,7 @@ ApplicationManager::RegistryCheckInstructions ApplicationManager::CheckForRegist
                 }
             }
             else
+#endif // BATCH MODE
             {
                 warningText = warningText.arg(tr("Restart the Asset Processor"));
                 QByteArray warningUtf8 = warningText.toUtf8();
@@ -990,25 +943,6 @@ void ApplicationDependencyInfo::SetTimestamp(const QDateTime& timestamp)
     m_timestamp = timestamp;
 }
 
-bool ApplicationDependencyInfo::IsModified() const
-{
-    return m_isModified;
-}
-
-void ApplicationDependencyInfo::SetIsModified(bool hasModified)
-{
-    m_isModified = hasModified;
-}
-
-bool ApplicationDependencyInfo::StillUpdating() const
-{
-    return m_stillUpdating;
-}
-
-void ApplicationDependencyInfo::SetStillUpdating(bool stillUpdating)
-{
-    m_stillUpdating = stillUpdating;
-}
 QString ApplicationDependencyInfo::FileName() const
 {
     return m_fileName;
@@ -1019,15 +953,6 @@ void ApplicationDependencyInfo::SetFileName(QString fileName)
     m_fileName = fileName;
 }
 
-void ApplicationDependencyInfo::SetWasPresentEver()
-{
-    m_wasPresentEver = true;
-}
-
-bool ApplicationDependencyInfo::WasPresentEver() const
-{
-    return m_wasPresentEver;
-}
 
 #include <native/utilities/ApplicationManager.moc>
 

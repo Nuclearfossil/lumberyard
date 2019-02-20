@@ -23,8 +23,6 @@
 #include "D3DStereo.h"
 #include "D3DHWShader.h"
 
-#include <IJobManager_JobDelegator.h>
-
 #include "Common/RenderView.h"
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -76,6 +74,7 @@ void CD3D9Renderer::EF_SortRenderList(int nList, int nAW, SRenderListDesc* pRLD,
         break;
 
     case EFSLIST_WATER_VOLUMES:
+    case EFSLIST_REFRACTIVE_SURFACE:
     case EFSLIST_TRANSP:
     case EFSLIST_WATER:
     case EFSLIST_HALFRES_PARTICLES:

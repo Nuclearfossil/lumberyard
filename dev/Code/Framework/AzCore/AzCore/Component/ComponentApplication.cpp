@@ -12,6 +12,7 @@
 #ifndef AZ_UNITY_BUILD
 
 #include <AzCore/PlatformIncl.h>
+#include <AzCore/AzCoreModule.h>
 
 #include <AzCore/Casting/numeric_cast.h>
 
@@ -25,7 +26,6 @@
 
 #include <AzCore/RTTI/AttributeReader.h>
 #include <AzCore/RTTI/BehaviorContext.h>
-#include <AzCore/RTTI/AzStdReflectionComponent.h>
 
 #include <AzCore/Module/Module.h>
 #include <AzCore/Module/ModuleManager.h>
@@ -39,22 +39,13 @@
 #include <AzCore/Debug/ProfilerDriller.h>
 #include <AzCore/Debug/EventTraceDriller.h>
 
-#include <AzCore/Asset/AssetManagerComponent.h>
-#include <AzCore/UserSettings/UserSettingsComponent.h>
-#include <AzCore/Memory/MemoryComponent.h>
-#include <AzCore/Debug/FrameProfilerComponent.h>
-#include <AzCore/IO/StreamerComponent.h>
-#include <AzCore/Jobs/JobManagerComponent.h>
-#include <AzCore/Serialization/ObjectStreamComponent.h>
-#include <AzCore/Script/ScriptSystemComponent.h>
-
-#include <AzCore/Slice/SliceComponent.h>
-#include <AzCore/Slice/SliceSystemComponent.h>
-#include <AzCore/Slice/SliceMetadataInfoComponent.h>
+#include <AzCore/Script/ScriptSystemBus.h>
 
 #include <AzCore/Math/PolygonPrism.h>
 #include <AzCore/Math/Spline.h>
 #include <AzCore/Math/VertexContainer.h>
+
+#include <AzCore/UserSettings/UserSettingsComponent.h>
 
 #include <AzCore/XML/rapidxml.h>
 
@@ -237,15 +228,13 @@ namespace AZ
         m_isStarted = false;
         m_isSystemAllocatorOwner = false;
         m_isOSAllocatorOwner = false;
-        m_memoryBlock = nullptr;
+        m_fixedMemoryBlock = nullptr;
         m_osAllocator = nullptr;
         m_currentTime = AZStd::chrono::system_clock::time_point::max();
         m_drillerManager = nullptr;
 
         m_deltaTime = 0.f;
         m_exeDirectory[0] = '\0';
-
-        TickBus::AllowFunctionQueuing(true);
     }
 
     //=========================================================================
@@ -299,8 +288,9 @@ namespace AZ
 
         AZ::SystemAllocator::Descriptor desc;
 
-        // Create temporary system allocator
-        bool isExistingSystemAllocator = AZ::AllocatorInstance<AZ::SystemAllocator>::IsReady();
+        // Create temporary system allocator to initialize the serialization context, after that the SystemAllocator
+        // will be created by CreateSystemAllocator
+        const bool isExistingSystemAllocator = AZ::AllocatorInstance<AZ::SystemAllocator>::IsReady();
 
         if (!isExistingSystemAllocator)
         {
@@ -309,9 +299,9 @@ namespace AZ
                 TemporaryBlockSize = 10 *  1024 * 1024
             };
 
-            desc.m_heap.m_numMemoryBlocks = 1;
-            desc.m_heap.m_memoryBlocksByteSize[0] = TemporaryBlockSize;
-            desc.m_heap.m_memoryBlocks[0] = m_osAllocator->Allocate(desc.m_heap.m_memoryBlocksByteSize[0], desc.m_heap.m_memoryBlockAlignment);
+            desc.m_heap.m_numFixedMemoryBlocks = 1;
+            desc.m_heap.m_fixedMemoryBlocksByteSize[0] = TemporaryBlockSize;
+            desc.m_heap.m_fixedMemoryBlocks[0] = m_osAllocator->Allocate(desc.m_heap.m_fixedMemoryBlocksByteSize[0], desc.m_heap.m_memoryBlockAlignment);
             AZ::AllocatorInstance<AZ::SystemAllocator>::Create(desc);
         }
 
@@ -319,20 +309,14 @@ namespace AZ
         {
             SerializeContext sc;
             Descriptor::Reflect(&sc, this);
-            ObjectStream::LoadBlocking(&stream, sc, nullptr, ObjectStream::FilterDescriptor(0, ObjectStream::FILTERFLAG_IGNORE_UNKNOWN_CLASSES));
+            ObjectStream::LoadBlocking(&stream, sc, nullptr, ObjectStream::FilterDescriptor(&AZ::Data::AssetFilterNoAssetLoading, ObjectStream::FILTERFLAG_IGNORE_UNKNOWN_CLASSES));
         }
 
         // Destroy the temp system allocator
         if (!isExistingSystemAllocator)
         {
             AZ::AllocatorInstance<AZ::SystemAllocator>::Destroy();
-            m_osAllocator->DeAllocate(desc.m_heap.m_memoryBlocks[0], desc.m_heap.m_memoryBlocksByteSize[0], desc.m_heap.m_memoryBlockAlignment);
-        }
-        else
-        {
-            AZ_Assert(m_descriptor.m_useExistingAllocator,
-                "%s has useExistingAllocator set to false, but an existing system allocator was found! If you will create the system allocator yourself then set useExistingAllocator to true!",
-                applicationDescriptorFile);
+            m_osAllocator->DeAllocate(desc.m_heap.m_fixedMemoryBlocks[0], desc.m_heap.m_fixedMemoryBlocksByteSize[0], desc.m_heap.m_memoryBlockAlignment);
         }
 
         CreateCommon();
@@ -360,7 +344,9 @@ namespace AZ
                 classId.ToString(idStr, AZ_ARRAY_SIZE(idStr));
                 AZ_Error("ComponentApplication", false, "Unknown class type %p %s", classPtr, idStr);
             }
-        });
+        }, 
+            ObjectStream::FilterDescriptor(&AZ::Data::AssetFilterNoAssetLoading, ObjectStream::FILTERFLAG_IGNORE_UNKNOWN_CLASSES));
+        // we cannot load assets during system bootstrap since we haven't even got the catalog yet.  But we can definitely read their IDs.
 
         AZ_Assert(systemEntity, "SystemEntity failed to load!");
         cfg.Close();
@@ -422,6 +408,9 @@ namespace AZ
 
         RegisterCoreComponents();
 
+        TickBus::AllowFunctionQueuing(true);
+        SystemTickBus::AllowFunctionQueuing(true);
+
         ComponentApplicationBus::Handler::BusConnect();
 
         m_currentTime = AZStd::chrono::system_clock::now();
@@ -452,11 +441,9 @@ namespace AZ
             }
 #endif
         }
-        // Load static modules if provided by the platform
-        if (m_startupParameters.m_createStaticModulesCallback)
-        {
-            ModuleManagerRequestBus::Broadcast(&ModuleManagerRequests::LoadStaticModules, m_startupParameters.m_createStaticModulesCallback, ModuleInitializationSteps::RegisterComponentDescriptors);
-        }
+
+        // Load static modules
+        ModuleManagerRequestBus::Broadcast(&ModuleManagerRequests::LoadStaticModules, AZStd::bind(&ComponentApplication::CreateStaticModules, this, AZStd::placeholders::_1), ModuleInitializationSteps::RegisterComponentDescriptors);
     }
 
     //=========================================================================
@@ -466,8 +453,15 @@ namespace AZ
     void ComponentApplication::Destroy()
     {
         // Finish all queued work
+        AZ::SystemTickBus::Broadcast(&AZ::SystemTickBus::Events::OnSystemTick);
+        
         TickBus::ExecuteQueuedEvents();
         TickBus::AllowFunctionQueuing(false);
+        
+        SystemTickBus::ExecuteQueuedEvents();
+        SystemTickBus::AllowFunctionQueuing(false);
+
+        AZ::UserSettingsComponentRequestBus::Broadcast(&AZ::UserSettingsComponentRequests::Finalize);
 
         // deactivate all entities
         Entity* systemEntity = nullptr;
@@ -532,15 +526,15 @@ namespace AZ
         {
             AZ::AllocatorInstance<AZ::SystemAllocator>::Destroy();
 
-            if (m_memoryBlock != nullptr)
+            if (m_fixedMemoryBlock)
             {
-                m_osAllocator->DeAllocate(m_memoryBlock);
+                m_osAllocator->DeAllocate(m_fixedMemoryBlock);
             }
-            m_memoryBlock = nullptr;
+            m_fixedMemoryBlock = nullptr;
             m_isSystemAllocatorOwner = false;
         }
 
-        
+
 
         if (m_isOSAllocatorOwner)
         {
@@ -565,7 +559,7 @@ namespace AZ
     //=========================================================================
     void ComponentApplication::CreateSystemAllocator()
     {
-        if (m_descriptor.m_useExistingAllocator)
+        if (m_descriptor.m_useExistingAllocator || AZ::AllocatorInstance<AZ::SystemAllocator>::IsReady())
         {
             m_isSystemAllocatorOwner = false;
             AZ_Assert(AZ::AllocatorInstance<AZ::SystemAllocator>::IsReady(), "You must setup AZ::SystemAllocator instance, before you can call Create application with m_useExistingAllocator flag set to true");
@@ -576,7 +570,6 @@ namespace AZ
             AZ::SystemAllocator::Descriptor desc;
             desc.m_heap.m_pageSize = m_descriptor.m_pageSize;
             desc.m_heap.m_poolPageSize = m_descriptor.m_poolPageSize;
-            desc.m_heap.m_numMemoryBlocks = 1;
             if (m_descriptor.m_grabAllMemory)
             {
                 // grab all available memory
@@ -586,23 +579,21 @@ namespace AZ
                 AZ_Warning("Memory", false, "This platform is not supported for grabAllMemory flag! Provide a valid allocation size and set the m_grabAllMemory flag to false! Using default max memory size %llu!", availableOS);
                 AZ_Assert(availableOS > 0, "OS doesn't have any memory available!");
                 // compute total memory to grab
-                desc.m_heap.m_memoryBlocksByteSize[0] = static_cast<size_t>(availableOS - reservedOS - reservedDbg);
+                desc.m_heap.m_fixedMemoryBlocksByteSize[0] = static_cast<size_t>(availableOS - reservedOS - reservedDbg);
                 // memory block MUST be a multiple of pages
-                desc.m_heap.m_memoryBlocksByteSize[0] = AZ::SizeAlignDown(desc.m_heap.m_memoryBlocksByteSize[0], m_descriptor.m_pageSize);
+                desc.m_heap.m_fixedMemoryBlocksByteSize[0] = AZ::SizeAlignDown(desc.m_heap.m_fixedMemoryBlocksByteSize[0], m_descriptor.m_pageSize);
             }
             else
             {
-                desc.m_heap.m_memoryBlocksByteSize[0] = static_cast<size_t>(m_descriptor.m_memoryBlocksByteSize);
+                desc.m_heap.m_fixedMemoryBlocksByteSize[0] = static_cast<size_t>(m_descriptor.m_memoryBlocksByteSize);
             }
 
+            if (desc.m_heap.m_fixedMemoryBlocksByteSize[0] > 0) // 0 means one demand memory which we support
             {
-                if (desc.m_heap.m_memoryBlocksByteSize[0] > 0) // 0 means one demand memory which we support
-                {
-                    m_memoryBlock = m_osAllocator->Allocate(desc.m_heap.m_memoryBlocksByteSize[0], m_descriptor.m_memoryBlockAlignment);
-                }
+                m_fixedMemoryBlock = m_osAllocator->Allocate(desc.m_heap.m_fixedMemoryBlocksByteSize[0], m_descriptor.m_memoryBlockAlignment);
+                desc.m_heap.m_fixedMemoryBlocks[0] = m_fixedMemoryBlock;
+                desc.m_heap.m_numFixedMemoryBlocks = 1;
             }
-
-            desc.m_heap.m_memoryBlocks[0] = m_memoryBlock;
             desc.m_allocationRecords = m_descriptor.m_allocationRecords;
             desc.m_stackRecordLevels = aznumeric_caster(m_descriptor.m_stackRecordLevels);
             AZ::AllocatorInstance<AZ::SystemAllocator>::Create(desc);
@@ -778,6 +769,19 @@ namespace AZ
     }
 
     //=========================================================================
+    // CreateStaticModules
+    //=========================================================================
+    void ComponentApplication::CreateStaticModules(AZStd::vector<AZ::Module*>& outModules)
+    {
+        if (m_startupParameters.m_createStaticModulesCallback)
+        {
+            m_startupParameters.m_createStaticModulesCallback(outModules);
+        }
+
+        outModules.emplace_back(aznew AzCoreModule());
+    }
+
+    //=========================================================================
     // Tick
     //=========================================================================
     void ComponentApplication::Tick(float deltaOverride /*= -1.f*/)
@@ -869,27 +873,9 @@ namespace AZ
 
     //=========================================================================
     // RegisterCoreComponents
-    // [5/30/2012]
     //=========================================================================
     void ComponentApplication::RegisterCoreComponents()
     {
-        RegisterComponentDescriptor(AzStdReflectionComponent::CreateDescriptor());
-        RegisterComponentDescriptor(MemoryComponent::CreateDescriptor());
-        RegisterComponentDescriptor(StreamerComponent::CreateDescriptor());
-        RegisterComponentDescriptor(JobManagerComponent::CreateDescriptor());
-        RegisterComponentDescriptor(AssetManagerComponent::CreateDescriptor());
-        RegisterComponentDescriptor(ObjectStreamComponent::CreateDescriptor());
-        RegisterComponentDescriptor(UserSettingsComponent::CreateDescriptor());
-        RegisterComponentDescriptor(Debug::FrameProfilerComponent::CreateDescriptor());
-        RegisterComponentDescriptor(SliceComponent::CreateDescriptor());
-        RegisterComponentDescriptor(SliceSystemComponent::CreateDescriptor());
-        RegisterComponentDescriptor(SliceMetadataInfoComponent::CreateDescriptor());
-
-
-#if !defined(AZCORE_EXCLUDE_LUA)
-        RegisterComponentDescriptor(ScriptSystemComponent::CreateDescriptor());
-#endif // #if !defined(AZCORE_EXCLUDE_LUA)
-
     }
 
     //=========================================================================
@@ -910,48 +896,17 @@ namespace AZ
     bool ComponentApplication::ShouldAddSystemComponent(AZ::ComponentDescriptor* descriptor)
     {
         // NOTE: This is different than modules! All system components must be listed in GetRequiredSystemComponents, and then AZ::Edit::Attributes::SystemComponentTags may be used to filter down from there
-
-        // If the required tags are empty, it is assumed all components with the attribute are required
-        if (m_startupParameters.m_systemComponentTags.empty())
+        if (m_moduleManager->GetSystemComponentTags().empty())
         {
             return true;
         }
 
         const SerializeContext::ClassData* classData = GetSerializeContext()->FindClassData(descriptor->GetUuid());
         AZ_Warning("ComponentApplication", classData, "Component type %s not reflected to SerializeContext!", descriptor->GetName());
-        if (classData)
-        {
-            if (Attribute* attribute = FindAttribute(Edit::Attributes::SystemComponentTags, classData->m_attributes))
-            {
-                // Read the tags
-                AZStd::vector<AZ::Crc32> tags;
-                AZ::AttributeReader reader(nullptr, attribute);
-                AZ::Crc32 tag;
-                if (reader.Read<AZ::Crc32>(tag))
-                {
-                    tags.emplace_back(tag);
-                }
-                else
-                {
-                    AZ_Verify(reader.Read<AZStd::vector<AZ::Crc32>>(tags), "Attribute \"AZ::Edit::Attributes::SystemComponentTags\" must be of type AZ::Crc32 or AZStd::vector<AZ::Crc32>");
-                }
 
-                // Match tags to required tags
-                for (const AZ::Crc32& requiredTag : m_startupParameters.m_systemComponentTags)
-                {
-                    if (AZStd::find(tags.begin(), tags.end(), requiredTag) != tags.end())
-                    {
-                        // Tag match, add component
-                        return true;
-                    }
-                }
-
-                // If the tags didn't match, don't use the component
-                return false;
-            }
-        }
-        // If attribute not present, assume wanted for all contexts
-        return true;
+        // Note, if there are no SystemComponentTags on the classData, we will return true
+        // in order to maintain backwards compatibility with legacy non-tagged components
+        return Edit::SystemComponentTagsMatchesAtLeastOneTag(classData, m_moduleManager->GetSystemComponentTags(), true);
     }
 
     //=========================================================================
@@ -995,7 +950,6 @@ namespace AZ
 
         AZ_Warning("Module", componentCount == systemEntity->GetComponents().size(),
             "Application implements deprecated function 'AddSystemComponents'. Use 'GetRequiredSystemComponents' instead.");
-        componentCount = systemEntity->GetComponents().size();
     }
 
     //=========================================================================
@@ -1009,7 +963,12 @@ namespace AZ
             return;
         }
 
-#if   defined(AZ_PLATFORM_ANDROID)
+#if defined(AZ_RESTRICTED_PLATFORM)
+#include AZ_RESTRICTED_FILE(ComponentApplication_cpp, AZ_RESTRICTED_PLATFORM)
+#endif
+#if defined(AZ_RESTRICTED_SECTION_IMPLEMENTED)
+#undef AZ_RESTRICTED_SECTION_IMPLEMENTED
+#elif defined(AZ_PLATFORM_ANDROID)
         // On Android, all dlopen calls should be relative.
         azstrcpy(m_exeDirectory, AZ_ARRAY_SIZE(m_exeDirectory), "");
 #else
@@ -1037,16 +996,7 @@ namespace AZ
 
         // exeDirectory currently contains full path to EXE.
         // Modify to end the string after the last '/'
-
-        // Iterate until finding last '/'
-        char* finalSlash = nullptr;
-        for (char* c = exeDirectory; c < exeDirEnd; ++c)
-        {
-            if (*c == '/')
-            {
-                finalSlash = c;
-            }
-        }
+        char* finalSlash = strrchr(exeDirectory, '/');
 
         // If no slashes found, path invalid.
         if (finalSlash)

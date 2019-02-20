@@ -520,7 +520,7 @@ FontFamilyPtr CCryFont::LoadFontFamily(const char* pFontFamilyName)
 FontFamilyPtr CCryFont::GetFontFamily(const char* pFontFamilyName)
 {
     auto it = m_fontFamilies.find(PathUtil::MakeGamePath(string(pFontFamilyName).Trim().MakeLower()).c_str());
-    return it != m_fontFamilies.end() ? std::shared_ptr<FontFamily>(it->second) : std::shared_ptr<FontFamily>(nullptr);
+    return it != m_fontFamilies.end() ? FontFamilyPtr(it->second) : FontFamilyPtr(nullptr);
 }
 
 void CCryFont::AddCharsToFontTextures(FontFamilyPtr pFontFamily, const char* pChars)
@@ -548,16 +548,6 @@ void CCryFont::GetMemoryUsage(ICrySizer* pSizer) const
     }
 
     pSizer->AddObject(m_fonts);
-
-#ifndef AZ_MONOLITHIC_BUILD
-    {
-        SIZER_COMPONENT_NAME(pSizer, "STL Allocator Waste");
-        CryModuleMemoryInfo meminfo;
-        ZeroStruct(meminfo);
-        CryGetMemoryInfoForModule(&meminfo);
-        pSizer->AddObject((this + 2), (size_t)meminfo.STL_wasted);
-    }
-#endif
 }
 
 string CCryFont::GetLoadedFontNames() const
@@ -579,6 +569,13 @@ string CCryFont::GetLoadedFontNames() const
 }
 
 void CCryFont::OnLanguageChanged()
+{
+    ReloadAllFonts();
+
+    EBUS_EVENT(LanguageChangeNotificationBus, LanguageChanged);
+}
+
+void CCryFont::ReloadAllFonts()
 {
     AZStd::list<AZStd::string> fontFamilyFilenames;
     AZStd::list<FontFamily*> fontFamilyWeakPtrs;
@@ -604,7 +601,7 @@ void CCryFont::OnLanguageChanged()
 
     // All UI text components need to reload their font assets (both in-game
     // and in-editor).
-    EBUS_EVENT(LanguageChangeNotificationBus, LanguageChanged);
+    EBUS_EVENT(FontNotificationBus, OnFontsReloaded);
 }
 
 void CCryFont::UnregisterFont(const char* pFontName)
@@ -738,12 +735,12 @@ bool CCryFont::AddFontFamilyToMaps(const char* pFontFamilyFilename, const char* 
     }
 
     // First, insert by filename
-    AZStd::pair<AZStd::string, std::weak_ptr<FontFamily>> insertPair(loweredFilename, fontFamily);
+    AZStd::pair<AZStd::string, AZStd::weak_ptr<FontFamily>> insertPair(loweredFilename, fontFamily);
     auto iterPosition = m_fontFamilies.insert(insertPair).first;
     m_fontFamilyReverseLookup[fontFamily.get()] = iterPosition;
     
     // Then, by Font Family name
-    AZStd::pair<AZStd::string, std::weak_ptr<FontFamily>> nameInsertPair(loweredFontFamilyName, fontFamily);
+    AZStd::pair<AZStd::string, AZStd::weak_ptr<FontFamily>> nameInsertPair(loweredFontFamilyName, fontFamily);
     m_fontFamilies.insert(nameInsertPair);
 
     return true;

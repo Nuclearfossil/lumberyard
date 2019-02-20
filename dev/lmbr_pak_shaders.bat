@@ -38,6 +38,7 @@ GOTO pythonPathSet
 SET BASE_PATH=%~dp0
 ECHO [WAF] Engine Root: %BASE_PATH%
 
+:pythonPathSet
 SET TOOLS_DIR=%BASE_PATH%\Tools
 
 SET PYTHON_DIR=%TOOLS_DIR%\Python
@@ -64,7 +65,7 @@ if [%PLATFORM%] == [] SET PLATFORM=pc
 SET SOURCE="Cache\%GAMENAME%\%PLATFORM%\user\cache\shaders\cache"
 SET OUTPUT="Build\%PLATFORM%\%GAMENAME%"
 
-call "%PYTHON%" %TOOLS_DIR%\PakShaders\pak_shaders.py %OUTPUT% -r %SOURCE% -s %SHADERFLAVOR%
+call "%PYTHON%" "%TOOLS_DIR%\PakShaders\pak_shaders.py" %OUTPUT% -r %SOURCE% -s %SHADERFLAVOR%
 
 IF ERRORLEVEL 1 GOTO FAILED
 popd

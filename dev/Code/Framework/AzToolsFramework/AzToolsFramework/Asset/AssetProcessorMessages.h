@@ -128,5 +128,92 @@ namespace AzToolsFramework
             AZ::Uuid m_sourceUUID;
             NotificationType m_type;
         };
+
+        class GetScanFoldersRequest
+            : public AzFramework::AssetSystem::BaseAssetProcessorMessage
+        {
+        public:
+            AZ_CLASS_ALLOCATOR(GetScanFoldersRequest, AZ::OSAllocator, 0);
+            AZ_RTTI(GetScanFoldersRequest, "{A3D7FD31-C260-4D6C-B970-D565B43F1316}", AzFramework::AssetSystem::BaseAssetProcessorMessage);
+            static void Reflect(AZ::ReflectContext* context);
+            static unsigned int MessageType();
+
+            ~GetScanFoldersRequest() override = default;
+
+            unsigned int GetMessageType() const override;
+        };
+
+        class GetScanFoldersResponse
+            : public AzFramework::AssetSystem::BaseAssetProcessorMessage
+        {
+        public:
+            AZ_CLASS_ALLOCATOR(GetScanFoldersResponse, AZ::OSAllocator, 0);
+            AZ_RTTI(GetScanFoldersResponse, "{13100365-009E-4C82-A682-A8E3646EB0E0}", AzFramework::AssetSystem::BaseAssetProcessorMessage);
+            static void Reflect(AZ::ReflectContext* context);
+
+            GetScanFoldersResponse() = default;
+            explicit GetScanFoldersResponse(const AZStd::vector<AZStd::string>& scanFolders);
+            explicit GetScanFoldersResponse(AZStd::vector<AZStd::string>&& scanFolders);
+            ~GetScanFoldersResponse() override = default;
+
+            unsigned int GetMessageType() const override;
+
+            AZStd::vector<AZStd::string> m_scanFolders;
+        };
+
+
+        class GetAssetSafeFoldersRequest
+            : public AzFramework::AssetSystem::BaseAssetProcessorMessage
+        {
+        public:
+            AZ_CLASS_ALLOCATOR(GetAssetSafeFoldersRequest, AZ::OSAllocator, 0);
+            AZ_RTTI(GetAssetSafeFoldersRequest, "{9A7951B1-257C-45F0-B334-A52A42A5A871}", AzFramework::AssetSystem::BaseAssetProcessorMessage);
+            static void Reflect(AZ::ReflectContext* context);
+            static unsigned int MessageType();
+
+            ~GetAssetSafeFoldersRequest() override = default;
+
+            unsigned int GetMessageType() const override;
+        };
+
+        class GetAssetSafeFoldersResponse
+            : public AzFramework::AssetSystem::BaseAssetProcessorMessage
+        {
+        public:
+            AZ_CLASS_ALLOCATOR(GetAssetSafeFoldersResponse, AZ::OSAllocator, 0);
+            AZ_RTTI(GetAssetSafeFoldersResponse, "{36C1AA51-8940-4909-A01B-19454B6312E5}", AzFramework::AssetSystem::BaseAssetProcessorMessage);
+            static void Reflect(AZ::ReflectContext* context);
+
+            GetAssetSafeFoldersResponse() = default;
+            explicit GetAssetSafeFoldersResponse(const AZStd::vector<AZStd::string>& assetSafeFolders);
+            explicit GetAssetSafeFoldersResponse(AZStd::vector<AZStd::string>&& assetSafeFolders);
+            ~GetAssetSafeFoldersResponse() override = default;
+
+            unsigned int GetMessageType() const override;
+
+            AZStd::vector<AZStd::string> m_assetSafeFolders;
+        };
+
+        class FileInfosNotificationMessage
+            : public AzFramework::AssetSystem::BaseAssetProcessorMessage
+        {
+        public:
+            enum NotificationType : unsigned int
+            {
+                Synced,
+                FileAdded,
+                FileRemoved
+            };
+
+            AZ_CLASS_ALLOCATOR(FileInfosNotificationMessage, AZ::OSAllocator, 0);
+            AZ_RTTI(FileInfosNotificationMessage, "{F5AF3ED1-1644-4972-AE21-B6A1B28D898A}", AzFramework::AssetSystem::BaseAssetProcessorMessage);
+            static void Reflect(AZ::ReflectContext* context);
+
+            FileInfosNotificationMessage() = default;
+            unsigned int GetMessageType() const override;
+
+            NotificationType m_type = NotificationType::Synced;
+            AZ::s64 m_fileID = 0;
+        };
     } // namespace AssetSystem
 } // namespace AzToolsFramework

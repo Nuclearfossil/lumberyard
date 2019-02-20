@@ -35,7 +35,7 @@
 namespace
 {
     bool s_nodeParamsInitialized = false;
-    std::vector<CAnimNode::SParamInfo> s_nodeParams;
+    StaticInstance<std::vector<CAnimNode::SParamInfo>> s_nodeParams;
 
     void AddSupportedParam(const char* sName, AnimParamType paramId, AnimValueType valueType)
     {
@@ -129,7 +129,7 @@ void CAnimMaterialNode::UpdateDynamicParamsInternal()
     for (int i = 0; i < shaderParams.size(); ++i)
     {
         SShaderParam& shaderParam = shaderParams[i];
-        m_nameToDynamicShaderParam[ shaderParams[i].m_Name ] = i;
+        m_nameToDynamicShaderParam[ shaderParams[i].m_Name.c_str() ] = i;
 
         CAnimNode::SParamInfo paramInfo;
 
@@ -153,11 +153,27 @@ void CAnimMaterialNode::UpdateDynamicParamsInternal()
             continue;
         }
 
-        paramInfo.name = shaderParam.m_Name;
+        paramInfo.name = shaderParam.m_Name.c_str();
         paramInfo.paramType = shaderParam.m_Name;
         paramInfo.flags = IAnimNode::ESupportedParamFlags(0);
 
         m_dynamicShaderParamInfos.push_back(paramInfo);
+    }
+
+    // Make sure any color tracks that are animated "ByString"
+    // have the track multiplier set.
+    int trackCount = NumTracks();
+    for (int trackIndex = 0; trackIndex < trackCount; trackIndex++)
+    {
+        IAnimTrack* track = m_tracks[trackIndex].get();
+        if (!(track->GetFlags() & IAnimTrack::eAnimTrackFlags_Disabled))
+        {
+            CAnimParamType param = track->GetParameterType();
+            if (param.GetType() == AnimParamType::ByString && track->GetValueType() == AnimValueType::RGB)
+            {
+                track->SetMultiplier(255.0f);
+            }
+        }
     }
 }
 
@@ -363,7 +379,7 @@ void CAnimMaterialNode::AnimateNamedParameter(SAnimContext& ec, IRenderShaderRes
             param.m_Value.m_Vector[2] = vecValue[2];
             break;
         case AnimValueType::RGB:
-            pTrack->GetValue(ec.time, colorValue);
+            pTrack->GetValue(ec.time, colorValue, true);
             param.m_Value.m_Color[0] = colorValue[0];
             param.m_Value.m_Color[1] = colorValue[1];
             param.m_Value.m_Color[2] = colorValue[2];
@@ -406,6 +422,13 @@ _smart_ptr<IMaterial> CAnimMaterialNode::GetMaterialByName(const char* pName)
     {
         return gEnv->p3DEngine->GetMaterialManager()->FindMaterial(GetName());
     }
+}
+
+//////////////////////////////////////////////////////////////////////////
+void CAnimMaterialNode::AddTrack(IAnimTrack* track)
+{
+    CAnimNode::AddTrack(track);
+    UpdateDynamicParams();
 }
 
 //////////////////////////////////////////////////////////////////////////

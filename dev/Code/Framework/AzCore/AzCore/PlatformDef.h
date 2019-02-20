@@ -9,8 +9,7 @@
 * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 *
 */
-#ifndef AZCORE_PLATFORM_DEF_H
-#define AZCORE_PLATFORM_DEF_H 1
+#pragma once
 
 //////////////////////////////////////////////////////////////////////////
 // Platforms
@@ -19,9 +18,9 @@
     #define ENABLE_TYPE_INFO_NAMES 1
 #endif
 
-#if defined(AZ_RESTRICTED_PLATFORM)
+#include "PlatformRestrictedFileDef.h"
 
-    #include "PlatformRestrictedFileDef.h"
+#if defined(AZ_RESTRICTED_PLATFORM)
 
     // xxx/PlatformDef_h_xxx.inl is a sectioned file. Each time we #include it, we need to specify which section of the file to load,
     // and rather than using hard-coded integers, we'll just register the sections here at the top
@@ -32,7 +31,7 @@
     #define PLATFORMDEF_H_SECTION_DLL_EXPORT 5
 
     #define PLATFORMDEF_H_SECTION PLATFORMDEF_H_SECTION_COMPILER_PLATFORM
-    #include AZ_RESTRICTED_FILE(PlatformDef_h)
+    #include AZ_RESTRICTED_FILE(PlatformDef_h, AZ_RESTRICTED_PLATFORM)
 
 #elif defined(_WIN32)
 
@@ -111,7 +110,7 @@
 
 #if defined(AZ_RESTRICTED_PLATFORM)
     #define PLATFORMDEF_H_SECTION PLATFORMDEF_H_SECTION_TRAITS
-    #include AZ_RESTRICTED_FILE(PlatformDef_h)
+    #include AZ_RESTRICTED_FILE(PlatformDef_h, AZ_RESTRICTED_PLATFORM)
 #else
     //----- Hardware traits ---------
     #if defined(AZ_PLATFORM_WINDOWS) || defined(AZ_PLATFORM_LINUX)
@@ -142,7 +141,6 @@
     #define AZ_TRAIT_OS_ENFORCE_STRICT_VIRTUAL_ALLOC_ALIGNMENT 0
     #if defined(AZ_PLATFORM_WINDOWS)
         #define AZ_TRAIT_OS_HAS_CRITICAL_SECTION_SPIN_COUNT 1
-        #define AZ_TRAIT_OS_HPHASCHEMA_OS_VIRTUAL_PAGE_SIZE (64 * 1024)
     #endif
     #if defined(AZ_PLATFORM_WINDOWS)
         #define AZ_TRAIT_OS_HPHA_MEMORYBLOCKBYTESIZE 512 * 1024 * 1024
@@ -152,9 +150,6 @@
     #if defined(AZ_PLATFORM_WINDOWS)
         #define AZ_TRAIT_OS_USE_FASTER_WINDOWS_SOCKET_CLOSE 1
     #endif
-    #if !defined(AZ_PLATFORM_WINDOWS) && !defined(AZ_PLATFORM_LINUX) && !defined(AZ_PLATFORM_ANDROID) && !defined(AZ_PLATFORM_APPLE)
-        #define AZ_TRAIT_OS_USE_HPHASCHEMA_4KPAGESIZE 1
-    #endif
     #if defined(AZ_PLATFORM_LINUX) || defined(AZ_PLATFORM_APPLE) || defined(AZ_PLATFORM_ANDROID)
         #define AZ_TRAIT_OS_USE_POSIX_SOCKETS 1
     #endif
@@ -163,11 +158,18 @@
     #endif
     #if defined(AZ_PLATFORM_WINDOWS)
         #define AZ_TRAIT_OS_USE_WINDOWS_ALIGNED_MALLOC 1
+        #define AZ_TRAIT_OS_USE_CUSTOM_ALLOCATOR_FOR_MALLOC 0
         #define AZ_TRAIT_OS_USE_WINDOWS_FILE_PATHS 1
         #define AZ_TRAIT_OS_USE_WINDOWS_QUERY_PERFORMANCE_COUNTER 1
         #define AZ_TRAIT_OS_USE_WINDOWS_SET_EVENT 1
         #define AZ_TRAIT_OS_USE_WINDOWS_SOCKETS 1
         #define AZ_TRAIT_OS_USE_WINDOWS_THREADS 1
+    #endif
+
+    #if defined(AZ_PLATFORM_APPLE) || defined(AZ_PLATFORM_LINUX) || defined(AZ_PLATFORM_ANDROID)
+        #define AZ_TRAIT_OS_DELETE_THROW noexcept
+    #else
+        #define AZ_TRAIT_OS_DELETE_THROW
     #endif
 
     //----- Compiler traits ---------
@@ -207,6 +209,10 @@
         #define AZ_TRAIT_COMPILER_USE_UNHANDLED_EXCEPTION_HANDLER 1
     #endif
 
+    #if defined(AZ_COMPILER_MSVC) && (_MSC_VER <= 1800)
+        #define AZ_TRAIT_COMPILER_USE_STATIC_STORAGE_FOR_NON_POD_STATICS 1
+    #endif
+
     //----- Other -------------------
     #define AZ_TRAIT_DENY_ASSETPROCESSOR_LOOPBACK 0
     #if defined(AZ_PLATFORM_WINDOWS)
@@ -220,6 +226,8 @@
     #if defined(AZ_PLATFORM_WINDOWS)
         #define AZ_TRAIT_USE_GET_MODULE_FILE_NAME 1
     #endif
+    
+    #define AZ_TRAIT_SKIP_CRYINTERLOCKED 0
     
     #if defined(AZ_PLATFORM_ANDROID)
         #define AZ_TRAIT_NO_SUPPORT_STACK_TRACE 1
@@ -277,7 +285,7 @@
 /// DLL import/export macros
 #if defined(AZ_RESTRICTED_PLATFORM)
 #   define PLATFORMDEF_H_SECTION PLATFORMDEF_H_SECTION_DLL_EXPORT
-#   include AZ_RESTRICTED_FILE(PlatformDef_h)
+#   include AZ_RESTRICTED_FILE(PlatformDef_h, AZ_RESTRICTED_PLATFORM)
 #elif defined(AZ_PLATFORM_WINDOWS)
 #   if defined(AZ_COMPILER_CLANG)
 #       define AZ_DLL_EXPORT __attribute__ ((dllexport))
@@ -440,7 +448,7 @@
 
 #if defined(AZ_RESTRICTED_PLATFORM)
     #define PLATFORMDEF_H_SECTION PLATFORMDEF_H_SECTION_OS
-    #include AZ_RESTRICTED_FILE(PlatformDef_h)
+    #include AZ_RESTRICTED_FILE(PlatformDef_h, AZ_RESTRICTED_PLATFORM)
 #else
 #   if defined(AZ_PLATFORM_WINDOWS)
 #       define AZ_THREAD_LOCAL  __declspec(thread)
@@ -484,7 +492,7 @@
 // Determine the dynamic library/module extension by platform
 #if defined(AZ_RESTRICTED_PLATFORM)
     #define PLATFORMDEF_H_SECTION PLATFORMDEF_H_SECTION_DLL
-    #include AZ_RESTRICTED_FILE(PlatformDef_h)
+    #include AZ_RESTRICTED_FILE(PlatformDef_h, AZ_RESTRICTED_PLATFORM)
 #elif defined(AZ_PLATFORM_WINDOWS)
   #define AZ_DYNAMIC_LIBRARY_PREFIX
   #define AZ_DYNAMIC_LIBRARY_EXTENSION  ".dll"
@@ -500,10 +508,3 @@
 #else 
   #pragma error("Unrecognized platform for library extension")
 #endif
-
-
-#endif // AZCORE_PLATFORM_DEF_H
-#pragma once
-
-
-

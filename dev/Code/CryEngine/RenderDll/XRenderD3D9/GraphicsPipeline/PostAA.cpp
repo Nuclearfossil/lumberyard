@@ -29,7 +29,6 @@ struct TemporalAAParameters
     // 1  0  3
     // 7  4  8
     float m_beckmannHarrisFilter[9];
-    float m_sharpeningFactor;
     float m_useAntiFlickerFilter;
     float m_clampingFactor;
     float m_newFrameWeight;
@@ -136,7 +135,6 @@ static void BuildTemporalParameters(TemporalAAParameters& temporalAAParameters)
     }
 
     temporalAAParameters.m_reprojection = reprojection64;
-    temporalAAParameters.m_sharpeningFactor = max(CRenderer::CV_r_AntialiasingTAASharpening + 1.0f, 1.0f);
     temporalAAParameters.m_useAntiFlickerFilter = (float)CRenderer::CV_r_AntialiasingTAAUseAntiFlickerFilter;
     temporalAAParameters.m_clampingFactor = CRenderer::CV_r_AntialiasingTAAClampingFactor;
     temporalAAParameters.m_newFrameWeight = AZStd::max(gRenDev->CV_r_AntialiasingTAANewFrameWeight, FLT_EPSILON);
@@ -253,24 +251,22 @@ void PostAAPass::RenderTemporalAA(
             GetUtils().SetTexture(CTexture::s_ptexHDRToneMaps[0], 2, FILTER_LINEAR);
         }
     }
-#if defined(CRY_USE_METAL) // Metal still expects a bound texture here!
     else
     {
         GetUtils().SetTexture(CTextureManager::Instance()->GetWhiteTexture(), 2, FILTER_LINEAR);
     }
-#endif
 
     GetUtils().SetTexture(GetUtils().GetVelocityObjectRT(), 3, FILTER_POINT);
     GetUtils().SetTexture(CTexture::s_ptexZTarget, 5, FILTER_POINT);
 
     D3DShaderResourceView* depthSRV[1] = { gcpRendD3D->m_pZBufferDepthReadOnlySRV };
-    gcpRendD3D->m_DevMan.BindSRV(eHWSC_Pixel, depthSRV, 16, 1);
+    gcpRendD3D->m_DevMan.BindSRV(eHWSC_Pixel, depthSRV, 14, 1);
     gcpRendD3D->FX_Commit();
 
     SD3DPostEffectsUtils::DrawFullScreenTri(outputTarget->GetWidth(), outputTarget->GetHeight());
 
     depthSRV[0] = nullptr;
-    gcpRendD3D->m_DevMan.BindSRV(eHWSC_Pixel, depthSRV, 16, 1);
+    gcpRendD3D->m_DevMan.BindSRV(eHWSC_Pixel, depthSRV, 14, 1);
     gcpRendD3D->FX_Commit();
 
     GetUtils().ShEndPass();
@@ -296,7 +292,6 @@ void PostAAPass::Execute()
     gRenDev->m_RP.m_FlagsShader_RT &= ~(g_HWSR_MaskBit[HWSR_SAMPLE0] | g_HWSR_MaskBit[HWSR_SAMPLE1] | g_HWSR_MaskBit[HWSR_SAMPLE2] | g_HWSR_MaskBit[HWSR_SAMPLE3]);
 
     CTexture* inOutBuffer = CTexture::s_ptexSceneSpecular;
-    GetUtils().CopyScreenToTexture(inOutBuffer);
 
     switch (CRenderer::CV_r_AntialiasingMode)
     {
@@ -425,6 +420,8 @@ void PostAAPass::RenderSMAA(CTexture* sourceTexture, CTexture** outputTexture)
                 TemporalAAParameters temporalAAParameters;
                 BuildTemporalParameters(temporalAAParameters);
 
+                const float sharpening = max(1.0f + CRenderer::CV_r_AntialiasingNonTAASharpening, 1.0f);
+
                 static CCryNameR szReprojMatrix("ReprojectionMatrix");
                 pShader->FXSetPSFloat(szReprojMatrix, (Vec4*)temporalAAParameters.m_reprojection.GetData(), 4);
 
@@ -432,7 +429,7 @@ void PostAAPass::RenderSMAA(CTexture* sourceTexture, CTexture** outputTexture)
                     temporalAAParameters.m_useAntiFlickerFilter,
                     temporalAAParameters.m_clampingFactor,
                     temporalAAParameters.m_newFrameWeight,
-                    temporalAAParameters.m_sharpeningFactor);
+                    sharpening);
 
                 static CCryNameR paramName("TemporalParams");
                 pShader->FXSetPSFloat(paramName, &temporalParams, 1);
@@ -444,13 +441,13 @@ void PostAAPass::RenderSMAA(CTexture* sourceTexture, CTexture** outputTexture)
             GetUtils().SetTexture(CTexture::s_ptexZTarget, 5, FILTER_POINT);
 
             D3DShaderResourceView* depthSRV[1] = { gcpRendD3D->m_pZBufferDepthReadOnlySRV };
-            gcpRendD3D->m_DevMan.BindSRV(eHWSC_Pixel, depthSRV, 16, 1);
+            gcpRendD3D->m_DevMan.BindSRV(eHWSC_Pixel, depthSRV, 14, 1);
             gcpRendD3D->FX_Commit();
 
             SD3DPostEffectsUtils::DrawFullScreenTriWPOS(currentTarget->GetWidth(), currentTarget->GetHeight());
 
             depthSRV[0] = nullptr;
-            gcpRendD3D->m_DevMan.BindSRV(eHWSC_Pixel, depthSRV, 16, 1);
+            gcpRendD3D->m_DevMan.BindSRV(eHWSC_Pixel, depthSRV, 14, 1);
             gcpRendD3D->FX_Commit();
 
             GetUtils().ShEndPass();
@@ -497,7 +494,11 @@ void PostAAPass::RenderComposites(CTexture* sourceTexture)
     PROFILE_LABEL_SCOPE("FLARES, GRAIN");
 
     gRenDev->m_RP.m_FlagsShader_RT &= ~(g_HWSR_MaskBit[HWSR_SAMPLE0] | g_HWSR_MaskBit[HWSR_SAMPLE1] | g_HWSR_MaskBit[HWSR_SAMPLE2] | g_HWSR_MaskBit[HWSR_SAMPLE3]);
-    if ((gcpRendD3D->FX_GetAntialiasingType() & eAT_TEMPORAL_MASK) == 0)
+
+    // enable sharpening controlled by r_AntialiasingNonTAASharpening here 
+    // TAA applies sharpening in a different shader stage (TAAGatherHistory)
+    if (!(gcpRendD3D->FX_GetAntialiasingType() & eAT_TAA_MASK) &&
+        CRenderer::CV_r_AntialiasingNonTAASharpening > 0.f)
     {
         gRenDev->m_RP.m_FlagsShader_RT |= g_HWSR_MaskBit[HWSR_SAMPLE2];
     }
@@ -577,13 +578,13 @@ void PostAAPass::RenderComposites(CTexture* sourceTexture)
         GetUtils().SetTexture(CTexture::s_ptexZTarget, 5, FILTER_POINT);
 
         D3DShaderResourceView* depthSRV[1] = { gcpRendD3D->m_pZBufferDepthReadOnlySRV };
-        gcpRendD3D->m_DevMan.BindSRV(eHWSC_Pixel, depthSRV, 16, 1);
+        gcpRendD3D->m_DevMan.BindSRV(eHWSC_Pixel, depthSRV, 14, 1);
         gcpRendD3D->FX_Commit();
 
         SPostEffectsUtils::DrawFullScreenTri(gcpRendD3D->GetOverlayWidth(), gcpRendD3D->GetOverlayHeight());
 
         depthSRV[0] = nullptr;
-        gcpRendD3D->m_DevMan.BindSRV(eHWSC_Pixel, depthSRV, 16, 1);
+        gcpRendD3D->m_DevMan.BindSRV(eHWSC_Pixel, depthSRV, 14, 1);
         gcpRendD3D->FX_Commit();
 
         gcpRendD3D->FX_PopRenderTarget(0);
@@ -591,7 +592,7 @@ void PostAAPass::RenderComposites(CTexture* sourceTexture)
     }
     else
     {
-        const Vec4 temporalParams(0, 0, 0, max(1.0f + CRenderer::CV_r_AntialiasingTAASharpening, 1.0f));
+        const Vec4 temporalParams(0, 0, 0, max(1.0f + CRenderer::CV_r_AntialiasingNonTAASharpening, 1.0f));
         static CCryNameR paramName("TemporalParams");
         CShaderMan::s_shPostAA->FXSetPSFloat(paramName, &temporalParams, 1);
 

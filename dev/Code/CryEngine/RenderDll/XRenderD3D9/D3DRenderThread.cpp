@@ -24,8 +24,7 @@
 bool CD3D9Renderer::RT_CreateDevice()
 {
     LOADING_TIME_PROFILE_SECTION;
-    MEMSTAT_CONTEXT(EMemStatContextTypes::MSC_D3D, 0, "Renderer CreateDevice");
-
+    
 #if (defined(WIN32) || defined(WIN64)) && !defined(SUPPORT_DEVICE_INFO)
     if (!m_bShaderCacheGen && !SetWindow(m_width, m_height, m_bFullScreen, m_hWnd))
     {
@@ -47,8 +46,9 @@ void CD3D9Renderer::RT_ReleaseCB(void* pVCB)
     SAFE_RELEASE(pCB);
 }
 
-void CD3D9Renderer::RT_ClearTarget(CTexture* pTex, const ColorF& color)
+void CD3D9Renderer::RT_ClearTarget(ITexture* tex, const ColorF& color)
 {
+    CTexture* pTex = reinterpret_cast<CTexture*>(tex);
     if (pTex->GetFlags() & FT_USAGE_DEPTHSTENCIL)
     {
         D3DDepthSurface* pSurf = reinterpret_cast<D3DDepthSurface*>(pTex->GetDeviceDepthStencilSurf());
@@ -256,6 +256,9 @@ void CD3D9Renderer::RT_Draw2dImageInternal(C2dImage* images, uint32 numImages, b
 
             FX_SetFPMode();
 
+#if defined(AZ_RESTRICTED_PLATFORM)
+#include AZ_RESTRICTED_FILE(D3DRenderThread_cpp, AZ_RESTRICTED_PLATFORM)
+#endif
         }
 
         FX_DrawPrimitive(eptTriangleStrip, i * 4, 4);
@@ -601,6 +604,17 @@ void CD3D9Renderer::RT_SetRendererCVar(ICVar* pCVar, const char* pArgText, const
             }
         }
     }
+}
+
+void CD3D9Renderer::RT_PostLevelLoading()
+{
+    CRenderer::RT_PostLevelLoading();
+
+    // Clear our the shadow mask texture in case the level we are loading does not
+    // have any shadow casters. If we don't clear out the mask then whatever was
+    // previous in the mask, including a previously loaded level, will be used and
+    // incorrect shadows will be drawn.
+    FX_ClearShadowMaskTexture();
 }
 
 //////////////////////////////////////////////////////////////////////////

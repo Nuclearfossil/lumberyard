@@ -53,6 +53,7 @@
 #include <GridMate/Memory.h>
 
 #include "Application.h"
+#include <AzFramework/AzFrameworkModule.h>
 #include <cctype>
 #include <stdio.h>
 
@@ -129,7 +130,7 @@ namespace AzFramework
             };
 
             // There's other stuff in the file we may not recognize (system components), but we're not interested in that stuff.
-            AZ::ObjectStream::FilterDescriptor loadFilter(nullptr, AZ::ObjectStream::FILTERFLAG_IGNORE_UNKNOWN_CLASSES);
+            AZ::ObjectStream::FilterDescriptor loadFilter(&AZ::Data::AssetFilterNoAssetLoading, AZ::ObjectStream::FILTERFLAG_IGNORE_UNKNOWN_CLASSES);
 
             if (!AZ::ObjectStream::LoadBlocking(&appDescriptorFileStream, serializeContext, classReadyCb, loadFilter, inplaceLoadCb))
             {
@@ -211,6 +212,7 @@ namespace AzFramework
                 AZStd::string testPathWithPrefixAndExt = AZStd::string::format("%s" AZ_DYNAMIC_LIBRARY_EXTENSION, testPath.c_str(), modulePathStr);
                 if (AZ::IO::SystemFile::Exists(testPathWithPrefixAndExt.c_str()))
                 {
+                    StringFunc::Path::Normalize(testPath);
                     modulePath = testPath.c_str();
                     return;
                 }
@@ -232,7 +234,9 @@ namespace AzFramework
     {
         if (!AZ::AllocatorInstance<AZ::OSAllocator>::IsReady())
         {
-            AZ::AllocatorInstance<AZ::OSAllocator>::Create();
+            AZ::OSAllocator::Descriptor osAllocatorDesc;
+            osAllocatorDesc.m_custom = startupParameters.m_allocator;
+            AZ::AllocatorInstance<AZ::OSAllocator>::Create(osAllocatorDesc);
             m_isOSAllocatorOwner = true;
         }
 
@@ -419,22 +423,6 @@ namespace AzFramework
     {
         AZ::ComponentApplication::RegisterCoreComponents();
 
-        RegisterComponentDescriptor(AzFramework::BootstrapReaderComponent::CreateDescriptor());
-        RegisterComponentDescriptor(AzFramework::AssetCatalogComponent::CreateDescriptor());
-        RegisterComponentDescriptor(AzFramework::NetBindingComponent::CreateDescriptor());
-        RegisterComponentDescriptor(AzFramework::NetBindingSystemComponent::CreateDescriptor());
-        RegisterComponentDescriptor(AzFramework::TransformComponent::CreateDescriptor());
-        RegisterComponentDescriptor(AzFramework::GameEntityContextComponent::CreateDescriptor());
-        RegisterComponentDescriptor(AzFramework::TargetManagementComponent::CreateDescriptor());
-        RegisterComponentDescriptor(AzFramework::CreateScriptDebugAgentFactory());
-        RegisterComponentDescriptor(AzFramework::AssetSystem::AssetSystemComponent::CreateDescriptor());
-        RegisterComponentDescriptor(AzFramework::InputSystemComponent::CreateDescriptor());
-        RegisterComponentDescriptor(AzFramework::DrillerNetworkAgentComponent::CreateDescriptor());
-
-#if !defined(AZCORE_EXCLUDE_LUA)
-        RegisterComponentDescriptor(AzFramework::ScriptComponent::CreateDescriptor());
-#endif
-
         // This is internal Amazon code, so register it's components for metrics tracking, otherwise the name of the component won't get sent back.
         AZStd::vector<AZ::Uuid> componentUuidsForMetricsCollection
         {
@@ -453,7 +441,9 @@ namespace AzFramework
             azrtti_typeid<AzFramework::NetBindingSystemComponent>(),
             azrtti_typeid<AzFramework::TransformComponent>(),
             azrtti_typeid<AzFramework::GameEntityContextComponent>(),
+#if !defined(_RELEASE)
             azrtti_typeid<AzFramework::TargetManagementComponent>(),
+#endif
             azrtti_typeid<AzFramework::AssetSystem::AssetSystemComponent>(),
             azrtti_typeid<AzFramework::InputSystemComponent>(),
             azrtti_typeid<AzFramework::DrillerNetworkAgentComponent>(),
@@ -538,7 +528,12 @@ namespace AzFramework
         else
         {
             CalculateExecutablePath();
-#if   defined(AZ_PLATFORM_ANDROID)
+#if defined(AZ_RESTRICTED_PLATFORM)
+#include AZ_RESTRICTED_FILE(Application_cpp, AZ_RESTRICTED_PLATFORM)
+#endif
+#if defined(AZ_RESTRICTED_SECTION_IMPLEMENTED)
+#undef AZ_RESTRICTED_SECTION_IMPLEMENTED
+#elif defined(AZ_PLATFORM_ANDROID)
             // On Android, all file reads should be relative.
             SetRootPath(RootPathType::AppRoot, "");
 #elif defined(AZ_PLATFORM_APPLE_IOS) || defined(AZ_PLATFORM_APPLE_TV)
@@ -619,6 +614,13 @@ namespace AzFramework
         SetRootPath(RootPathType::AssetRoot, m_appRoot);
     }
 
+    void Application::CreateStaticModules(AZStd::vector<AZ::Module*>& outModules)
+    {
+        AZ::ComponentApplication::CreateStaticModules(outModules);
+
+        outModules.emplace_back(aznew AzFrameworkModule());
+    }
+
     const char* Application::GetCurrentConfigurationName() const
     {
 #if defined(_RELEASE)
@@ -684,15 +686,15 @@ namespace AzFramework
     }
 
     ////////////////////////////////////////////////////////////////////////////
-    void Application::MakePathRootRelative(AZStd::string& fullPath) 
-    { 
-        MakePathRelative(fullPath, m_appRoot); 
+    void Application::MakePathRootRelative(AZStd::string& fullPath)
+    {
+        MakePathRelative(fullPath, m_appRoot);
     }
 
     ////////////////////////////////////////////////////////////////////////////
-    void Application::MakePathAssetRootRelative(AZStd::string& fullPath) 
-    { 
-        MakePathRelative(fullPath, m_assetRoot); 
+    void Application::MakePathAssetRootRelative(AZStd::string& fullPath)
+    {
+        MakePathRelative(fullPath, m_assetRoot);
     }
 
     ////////////////////////////////////////////////////////////////////////////

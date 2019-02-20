@@ -259,6 +259,11 @@ int COctreeNode::SaveObjects(CMemoryBlock* pMemBlock, std::vector<IStatObj*>* pS
                 continue;
             }
 
+            if ((pRenderNode->GetRndFlags() & ERF_COMPONENT_ENTITY) != 0)
+            {
+                continue;
+            }
+
             nBlockSize += GetSingleObjectSize(pObj, pExportInfo);
         }
     }
@@ -280,6 +285,11 @@ int COctreeNode::SaveObjects(CMemoryBlock* pMemBlock, std::vector<IStatObj*>* pS
             EERType eType = pRenderNode->GetRenderNodeType();
 
             if (!(nObjTypeMask & (1 << eType)))
+            {
+                continue;
+            }
+
+            if ((pRenderNode->GetRndFlags() & ERF_COMPONENT_ENTITY) != 0)
             {
                 continue;
             }
@@ -341,7 +351,7 @@ int COctreeNode::GetSingleObjectSize(IRenderNode* pObj, const SHotUpdateInfo* pE
     {
         CWaterVolumeRenderNode* pWVRN(static_cast< CWaterVolumeRenderNode* >(pRenderNode));
         const SWaterVolumeSerialize* pSerParams(pWVRN->GetSerializationParams());
-        if (pSerParams)
+        if (pSerParams && pWVRN->m_hasToBeSerialised)
         {
             nBlockSize += sizeof(eType);
             nBlockSize += sizeof(SWaterVolumeChunk);
@@ -353,9 +363,13 @@ int COctreeNode::GetSingleObjectSize(IRenderNode* pObj, const SHotUpdateInfo* pE
     }
     else if (eType == eERType_Road)
     {
-        nBlockSize += sizeof(eType);
-        nBlockSize += sizeof(SRoadChunk);
-        nBlockSize += ((CRoadRenderNode*)pRenderNode)->m_arrVerts.GetDataSize();
+        auto roadRenderNode = static_cast<CRoadRenderNode*>(pRenderNode);
+        if (roadRenderNode->m_hasToBeSerialised)
+        {
+            nBlockSize += sizeof(eType);
+            nBlockSize += sizeof(SRoadChunk);
+            nBlockSize += roadRenderNode->m_arrVerts.GetDataSize();
+        }
     }
     else if (eType == eERType_DistanceCloud)
     {
@@ -469,38 +483,40 @@ void COctreeNode::SaveSingleObject(byte*& pPtr, int& nDatanSize, IRenderNode* pE
     }
     else if (eType == eERType_Road)
     {
-        AddToPtr(pPtr, nDatanSize, eType, eEndian);
+        CRoadRenderNode* pObj = static_cast<CRoadRenderNode*>(pEnt);
 
-        CRoadRenderNode* pObj = (CRoadRenderNode*)pEnt;
-
-        SRoadChunk chunk;
-
-        CopyCommonData(&chunk, pObj);
-
-        // road data
-        chunk.m_nMaterialId = CObjManager::GetItemId(pMatTable, pObj->GetMaterial());
-        chunk.m_nSortPriority = pObj->m_sortPrio;
-        chunk.m_nFlags = pObj->m_bIgnoreTerrainHoles ? ROADCHUNKFLAG_IGNORE_TERRAIN_HOLES : 0;
-        chunk.m_nFlags |= pObj->m_bPhysicalize ? ROADCHUNKFLAG_PHYSICALIZE : 0;
-
-        chunk.m_nVertsNum = pObj->m_arrVerts.Count();
-
-        for (int i = 0; i < 2; i++)
+        if (pObj->m_hasToBeSerialised)
         {
-            COPY_MEMBER_SAVE(&chunk, pObj, m_arrTexCoors[i]);
-        }
+            AddToPtr(pPtr, nDatanSize, eType, eEndian);
+            SRoadChunk chunk;
 
-        for (int i = 0; i < 2; i++)
-        {
-            COPY_MEMBER_SAVE(&chunk, pObj, m_arrTexCoorsGlobal[i]);
-        }
+            CopyCommonData(&chunk, pObj);
 
-        AddToPtr(pPtr, nDatanSize, chunk, eEndian);
+            // road data
+            chunk.m_nMaterialId = CObjManager::GetItemId(pMatTable, pObj->GetMaterial());
+            chunk.m_nSortPriority = pObj->m_sortPrio;
+            chunk.m_nFlags = pObj->m_bIgnoreTerrainHoles ? ROADCHUNKFLAG_IGNORE_TERRAIN_HOLES : 0;
+            chunk.m_nFlags |= pObj->m_bPhysicalize ? ROADCHUNKFLAG_PHYSICALIZE : 0;
 
-        for (int i = 0; i < pObj->m_arrVerts.Count(); i++)
-        {
-            Vec3 vPos(pObj->m_arrVerts[i]);
-            AddToPtr(pPtr, nDatanSize, vPos, eEndian);
+            chunk.m_nVertsNum = pObj->m_arrVerts.Count();
+
+            for (int i = 0; i < 2; i++)
+            {
+                COPY_MEMBER_SAVE(&chunk, pObj, m_arrTexCoors[i]);
+            }
+
+            for (int i = 0; i < 2; i++)
+            {
+                COPY_MEMBER_SAVE(&chunk, pObj, m_arrTexCoorsGlobal[i]);
+            }
+
+            AddToPtr(pPtr, nDatanSize, chunk, eEndian);
+
+            for (int i = 0; i < pObj->m_arrVerts.Count(); i++)
+            {
+                Vec3 vPos(pObj->m_arrVerts[i]);
+                AddToPtr(pPtr, nDatanSize, vPos, eEndian);
+            }
         }
     }
     else if (eERType_Decal == eType  && !(pEnt->GetRndFlags() & ERF_PROCEDURAL))
@@ -533,67 +549,70 @@ void COctreeNode::SaveSingleObject(byte*& pPtr, int& nDatanSize, IRenderNode* pE
     {
         CWaterVolumeRenderNode* pObj((CWaterVolumeRenderNode*)pEnt);
 
-        // get access to serialization parameters
-        const SWaterVolumeSerialize* pSerData(pObj->GetSerializationParams());
-        if (pSerData)
+        if (pObj->m_hasToBeSerialised)
         {
-            //assert( pSerData ); // trying to save level outside the editor?
-
-            // save type
-            AddToPtr(pPtr, nDatanSize, eType, eEndian);
-
-            // save node data
-            SWaterVolumeChunk chunk;
-            int cntAux;
-            float* pAuxData = pObj->GetAuxSerializationDataPtr(cntAux);
-
-            CopyCommonData(&chunk, pObj);
-
-            chunk.m_volumeTypeAndMiscBits = (pSerData->m_volumeType & 0xFFFF) | ((pSerData->m_capFogAtVolumeDepth ? 1 : 0) << 16) | ((pSerData->m_fogColorAffectedBySun ? 0 : 1) << 17) | (cntAux << 24);
-            chunk.m_volumeID = pSerData->m_volumeID;
-
-            chunk.m_materialID = CObjManager::GetItemId(pMatTable, pSerData->m_pMaterial);
-
-            chunk.m_fogDensity = pSerData->m_fogDensity;
-            chunk.m_fogColor = pSerData->m_fogColor;
-            chunk.m_fogPlane = pSerData->m_fogPlane;
-            chunk.m_fogShadowing = pSerData->m_fogShadowing;
-
-            chunk.m_caustics = pSerData->m_caustics;
-            chunk.m_causticIntensity = pSerData->m_causticIntensity;
-            chunk.m_causticTiling = pSerData->m_causticTiling;
-            chunk.m_causticHeight = pSerData->m_causticHeight;
-
-            chunk.m_uTexCoordBegin = pSerData->m_uTexCoordBegin;
-            chunk.m_uTexCoordEnd = pSerData->m_uTexCoordEnd;
-            chunk.m_surfUScale = pSerData->m_surfUScale;
-            chunk.m_surfVScale = pSerData->m_surfVScale;
-            chunk.m_numVertices = pSerData->m_vertices.size();
-
-            chunk.m_volumeDepth = pSerData->m_volumeDepth;
-            chunk.m_streamSpeed = pSerData->m_streamSpeed;
-            chunk.m_numVerticesPhysAreaContour = pSerData->m_physicsAreaContour.size();
-
-            AddToPtr(pPtr, nDatanSize, chunk, eEndian);
-            AddToPtr(pPtr, pAuxData, cntAux, eEndian);
-            nDatanSize -= cntAux * sizeof(pAuxData[0]);
-
-            // save vertices
-            for (size_t i(0); i < pSerData->m_vertices.size(); ++i)
+            // get access to serialization parameters
+            const SWaterVolumeSerialize* pSerData(pObj->GetSerializationParams());
+            if (pSerData)
             {
-                SWaterVolumeVertex v;
-                v.m_xyz = pSerData->m_vertices[i];
+                //assert( pSerData ); // trying to save level outside the editor?
 
-                AddToPtr(pPtr, nDatanSize, v, eEndian);
-            }
+                // save type
+                AddToPtr(pPtr, nDatanSize, eType, eEndian);
 
-            // save physics area contour vertices
-            for (size_t i(0); i < pSerData->m_physicsAreaContour.size(); ++i)
-            {
-                SWaterVolumeVertex v;
-                v.m_xyz = pSerData->m_physicsAreaContour[i];
+                // save node data
+                SWaterVolumeChunk chunk;
+                int cntAux;
+                float* pAuxData = pObj->GetAuxSerializationDataPtr(cntAux);
 
-                AddToPtr(pPtr, nDatanSize, v, eEndian);
+                CopyCommonData(&chunk, pObj);
+
+                chunk.m_volumeTypeAndMiscBits = (pSerData->m_volumeType & 0xFFFF) | ((pSerData->m_capFogAtVolumeDepth ? 1 : 0) << 16) | ((pSerData->m_fogColorAffectedBySun ? 0 : 1) << 17) | (cntAux << 24);
+                chunk.m_volumeID = pSerData->m_volumeID;
+
+                chunk.m_materialID = CObjManager::GetItemId(pMatTable, pSerData->m_pMaterial);
+
+                chunk.m_fogDensity = pSerData->m_fogDensity;
+                chunk.m_fogColor = pSerData->m_fogColor;
+                chunk.m_fogPlane = pSerData->m_fogPlane;
+                chunk.m_fogShadowing = pSerData->m_fogShadowing;
+
+                chunk.m_caustics = pSerData->m_caustics;
+                chunk.m_causticIntensity = pSerData->m_causticIntensity;
+                chunk.m_causticTiling = pSerData->m_causticTiling;
+                chunk.m_causticHeight = pSerData->m_causticHeight;
+
+                chunk.m_uTexCoordBegin = pSerData->m_uTexCoordBegin;
+                chunk.m_uTexCoordEnd = pSerData->m_uTexCoordEnd;
+                chunk.m_surfUScale = pSerData->m_surfUScale;
+                chunk.m_surfVScale = pSerData->m_surfVScale;
+                chunk.m_numVertices = pSerData->m_vertices.size();
+
+                chunk.m_volumeDepth = pSerData->m_volumeDepth;
+                chunk.m_streamSpeed = pSerData->m_streamSpeed;
+                chunk.m_numVerticesPhysAreaContour = pSerData->m_physicsAreaContour.size();
+
+                AddToPtr(pPtr, nDatanSize, chunk, eEndian);
+                AddToPtr(pPtr, pAuxData, cntAux, eEndian);
+                nDatanSize -= cntAux * sizeof(pAuxData[0]);
+
+                // save vertices
+                for (size_t i(0); i < pSerData->m_vertices.size(); ++i)
+                {
+                    SWaterVolumeVertex v;
+                    v.m_xyz = pSerData->m_vertices[i];
+
+                    AddToPtr(pPtr, nDatanSize, v, eEndian);
+                }
+
+                // save physics area contour vertices
+                for (size_t i(0); i < pSerData->m_physicsAreaContour.size(); ++i)
+                {
+                    SWaterVolumeVertex v;
+                    v.m_xyz = pSerData->m_physicsAreaContour[i];
+
+                    AddToPtr(pPtr, nDatanSize, v, eEndian);
+                }
             }
         }
     }
@@ -635,8 +654,6 @@ void COctreeNode::LoadSingleObject(byte*& pPtr, std::vector<IStatObj*>* pStatObj
     // For these structures, our Endian swapping is built in to the member copy.
     if (eType == eERType_Brush)
     {
-        MEMSTAT_CONTEXT(EMemStatContextTypes::MSC_Terrain, 0, "Brush object");
-
         SBrushChunk* pChunk = StepData<SBrushChunk>(pPtr, eEndian);
 
         if (!CheckRenderFlagsMinSpec(pChunk->m_dwRndFlags))
@@ -690,8 +707,6 @@ void COctreeNode::LoadSingleObject(byte*& pPtr, std::vector<IStatObj*>* pStatObj
     }
     else if (eType == eERType_Vegetation && nChunkVersion == OCTREENODE_CHUNK_VERSION_OLD)
     {
-        MEMSTAT_CONTEXT(EMemStatContextTypes::MSC_Terrain, 0, "Vegetation object");
-
         SVegetationChunkOld* pChunk = StepData<SVegetationChunkOld>(pPtr, eEndian);
 
         if (!CheckRenderFlagsMinSpec(GetObjManager()->GetListStaticTypes()[nSID][pChunk->m_nObjectTypeIndex].m_dwRndFlags))
@@ -726,8 +741,6 @@ void COctreeNode::LoadSingleObject(byte*& pPtr, std::vector<IStatObj*>* pStatObj
     }
     else if (eType == eERType_Vegetation)
     {
-        MEMSTAT_CONTEXT(EMemStatContextTypes::MSC_Terrain, 0, "Vegetation object");
-
         SVegetationChunk* pChunk = StepData<SVegetationChunk>(pPtr, eEndian);
 
         if (!CheckRenderFlagsMinSpec(GetObjManager()->GetListStaticTypes()[nSID][pChunk->m_nObjectTypeIndex].m_dwRndFlags))
@@ -764,7 +777,6 @@ void COctreeNode::LoadSingleObject(byte*& pPtr, std::vector<IStatObj*>* pStatObj
     }
     else if (eType == eERType_MergedMesh)
     {
-        MEMSTAT_CONTEXT(EMemStatContextTypes::MSC_Terrain, 0, "Merged Mesh Object");
         SMergedMeshChunk* pChunk = StepData<SMergedMeshChunk>(pPtr, eEndian);
         CMergedMeshRenderNode* pObj = m_pMergedMeshesManager->GetNode((pChunk->m_Extents.max + pChunk->m_Extents.min) * 0.5f);
         LoadCommonData(pChunk, pObj, pLayerVisibility);

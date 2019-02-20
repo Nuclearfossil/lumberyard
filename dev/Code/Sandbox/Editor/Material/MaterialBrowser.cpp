@@ -37,7 +37,6 @@
 #include <QMenu>
 #include <QMessageBox>
 #include <QPainter>
-#include <QProcess>
 #include <QSortFilterProxyModel>
 #include <QTreeView>
 #if defined(Q_OS_WIN)
@@ -48,6 +47,7 @@
 #include <QtUtil.h>
 #include <Util/AbstractGroupProxyModel.h>
 
+#include <AzQtComponents/Utilities/DesktopUtilities.h>
 #include <AzToolsFramework/AssetBrowser/AssetBrowserBus.h>
 #include <AzToolsFramework/AssetBrowser/AssetBrowserModel.h>
 #include <AzToolsFramework/AssetBrowser/AssetBrowserEntry.h>
@@ -86,6 +86,15 @@ enum
     MENU_SCM_GET_LATEST_TEXTURES,
 };
 
+static QAction* CreateTreeViewAction(const char* text, const QKeySequence& shortcut, QWidget* shortcutContext, MaterialBrowserWidget* widget, void (MaterialBrowserWidget::*slot)())
+{
+    QAction* action = new QAction(text, shortcutContext);
+    action->setShortcut(shortcut);
+    QObject::connect(action, &QAction::triggered, widget, slot);
+    widget->addAction(action);
+    return action;
+}
+
 //////////////////////////////////////////////////////////////////////////
 MaterialBrowserWidget::MaterialBrowserWidget(QWidget* parent)
     : QWidget(parent)
@@ -96,7 +105,14 @@ MaterialBrowserWidget::MaterialBrowserWidget(QWidget* parent)
 
     m_ui->setupUi(this);
 
-    m_ui->treeView->installEventFilter(this);
+    // create some permanent (for the life of this widget) actions for shortcut handling
+    m_cutAction = CreateTreeViewAction("Cut", QKeySequence::Cut, m_ui->treeView, this, &MaterialBrowserWidget::OnCut);
+    m_copyAction = CreateTreeViewAction("Copy", QKeySequence::Copy, m_ui->treeView, this, &MaterialBrowserWidget::OnCopy);
+    m_pasteAction = CreateTreeViewAction("Paste", QKeySequence::Paste, m_ui->treeView, this, &MaterialBrowserWidget::OnPaste);
+    m_duplicateAction = CreateTreeViewAction("Duplicate", QKeySequence(Qt::CTRL + Qt::Key_D), m_ui->treeView, this, &MaterialBrowserWidget::OnDuplicate);
+    m_deleteAction = CreateTreeViewAction("Delete", QKeySequence::Delete, m_ui->treeView, this, &MaterialBrowserWidget::DeleteItem);
+    m_renameItemAction = CreateTreeViewAction("Rename", Qt::Key_F2, m_ui->treeView, this, &MaterialBrowserWidget::OnRenameItem);
+    m_addNewMaterialAction = CreateTreeViewAction("Add New Material", Qt::Key_Insert, m_ui->treeView, this, &MaterialBrowserWidget::OnAddNewMaterial);
 
     MaterialBrowserWidgetBus::Handler::BusConnect();
 
@@ -120,7 +136,7 @@ MaterialBrowserWidget::MaterialBrowserWidget(QWidget* parent)
     
     // Override the AssetBrowserTreeView's custom context menu
     disconnect(m_ui->treeView, &QWidget::customContextMenuRequested, 0, 0);
-    connect(m_ui->treeView, &QWidget::customContextMenuRequested, [=](const QPoint& point)
+    connect(m_ui->treeView, &QWidget::customContextMenuRequested, this, [=](const QPoint& point)
         {
             CMaterialBrowserRecord record;
             bool found = TryGetSelectedRecord(record);
@@ -130,6 +146,8 @@ MaterialBrowserWidget::MaterialBrowserWidget(QWidget* parent)
     connect(m_ui->treeView->selectionModel(), &QItemSelectionModel::selectionChanged, this, &MaterialBrowserWidget::OnSelectionChanged);
     //Wait for the signal emitted on record update jobs finished, then we can restore the selection for the previous selected item
     connect(this, SIGNAL(refreshSelection()), this, SLOT(OnRefreshSelection()));
+
+    connect(this, SIGNAL(materialAdded()), this, SLOT(OnMaterialAdded()));
 
     m_bIgnoreSelectionChange = false;
     m_bItemsValid = true;
@@ -241,6 +259,7 @@ void MaterialBrowserWidget::OnEditorNotifyEvent(EEditorNotifyEvent event)
     break;
     case eNotify_OnCloseScene:
     {
+        m_filterModel->ShowOnlyLevelMaterials(false, true);
         ClearItems();
         m_ui->treeView->SaveState();
         //Need to make sure the selection is cleared before clearing the record map
@@ -251,6 +270,7 @@ void MaterialBrowserWidget::OnEditorNotifyEvent(EEditorNotifyEvent event)
     case eNotify_OnEndNewScene:
     case eNotify_OnEndSceneOpen:
     {
+        m_filterModel->ShowOnlyLevelMaterials(false, true);
         m_filterModel->StartRecordUpdateJobs();
         m_ui->treeView->ApplyTreeViewSnapshot();
     }
@@ -446,6 +466,11 @@ void MaterialBrowserWidget::OnCopyName()
         CClipboard clipboard(this);
         clipboard.PutString(pMtl->GetName(), "Material Name");
     }
+}
+
+void MaterialBrowserWidget::ShowOnlyLevelMaterials(bool levelOnly)
+{
+    m_filterModel->ShowOnlyLevelMaterials(levelOnly);
 }
 
 //////////////////////////////////////////////////////////////////////////
@@ -685,6 +710,7 @@ void MaterialBrowserWidget::OnRenameItem()
         }
         pMtl->SetName(itemName);
         pMtl->Save();
+        SetSelectedItem(pMtl, 0, true);
     }
 }
 
@@ -1045,6 +1071,15 @@ void MaterialBrowserWidget::RefreshSelected()
             _smart_ptr<CMaterial> pMultiMtl = nullptr;
             if (pMtl->IsMultiSubMaterial())
             {
+                // It's possible that the currently selected sub-material index is beyond the range of the current multi-material if, for example,
+                // the last sub-material was selected but then the source .mtl file was changed to have fewer total sub-materials
+                if (m_selectedSubMaterialIndex >= pMtl->GetSubMaterialCount())
+                {
+                    // If that's the case, select the last sub-material
+                    // If the sub-material count has dropped to 0, setting m_selectedSubMaterialIndex to -1 will cause the parent material to be selected
+                    m_selectedSubMaterialIndex = pMtl->GetSubMaterialCount() - 1;
+                }
+
                 pMultiMtl = pMtl;
                 if (m_selectedSubMaterialIndex >= 0)
                 {
@@ -1216,6 +1251,7 @@ void MaterialBrowserWidget::AddContextMenuActionsSubMaterial(QMenu& menu, _smart
     action->setShortcut(QKeySequence::Paste);
     action->setData(MENU_PASTE);
     action->setEnabled(CanPaste() && enabled);
+
     action = menu.addAction(tr("Rename\tF2"));
     action->setData(MENU_RENAME);
     action->setEnabled(enabled);
@@ -1385,18 +1421,7 @@ void MaterialBrowserWidget::OnContextMenuAction(int command, _smart_ptr<CMateria
         if (material)
         {
             QString fullPath = material->GetFilename();
-            QString filename = PathUtil::GetFile(fullPath.toUtf8().data());
-#if defined(AZ_PLATFORM_WINDOWS)
-            if (!QProcess::startDetached(QStringLiteral("explorer"), { QStringLiteral("/select,%1").arg(filename) }, Path::GetPath(fullPath)))
-            {
-                QProcess::startDetached(QStringLiteral("explorer"), { Path::GetPath(fullPath) });
-            }
-#else
-            QProcess::startDetached("/usr/bin/osascript", {"-e",
-                QStringLiteral("tell application \"Finder\" to reveal POSIX file \"%1\"").arg(fullPath)});
-            QProcess::startDetached("/usr/bin/osascript", {"-e",
-                QStringLiteral("tell application \"Finder\" to activate")});
-#endif
+            AzQtComponents::ShowFileOnDesktop(fullPath);
         }
     }
     break;
@@ -1410,21 +1435,9 @@ void MaterialBrowserWidget::OnContextMenuAction(int command, _smart_ptr<CMateria
         if (material)
         {
             QString fullPath = material->GetFilename();
-            QString filename = PathUtil::GetFile(fullPath.toUtf8().data());
-
             if (CFileUtil::ExtractFile(fullPath, true, fullPath.toUtf8().data()))
             {
-#if defined(AZ_PLATFORM_WINDOWS)
-                if (!QProcess::startDetached(QStringLiteral("explorer"), { QStringLiteral("/select,%1").arg(filename) }, Path::GetPath(fullPath)))
-                {
-                    QProcess::startDetached(QStringLiteral("explorer"), { Path::GetPath(fullPath) });
-                }
-#else
-                QProcess::startDetached("/usr/bin/osascript", {"-e",
-                    QStringLiteral("tell application \"Finder\" to reveal POSIX file \"%1\"").arg(fullPath)});
-                QProcess::startDetached("/usr/bin/osascript", {"-e",
-                    QStringLiteral("tell application \"Finder\" to activate")});
-#endif
+                AzQtComponents::ShowFileOnDesktop(fullPath);
             }
         }
     }
@@ -1493,11 +1506,6 @@ void MaterialBrowserWidget::OnContextMenuAction(int command, _smart_ptr<CMateria
         OnSaveToFile(true);
         break;
         //case MENU_MAKE_SUBMTL: OnAddNewMultiMaterial(); break;
-    }
-
-    if (command != 0) // no need to refresh everything if we canceled menu
-    {
-        OnRefreshSelection();
     }
 }
 
@@ -1648,49 +1656,18 @@ void MaterialBrowserWidget::OnRefreshSelection()
     }
 }
 
-//////////////////////////////////////////////////////////////////////////
-bool MaterialBrowserWidget::eventFilter(QObject* watched, QEvent* event)
+void MaterialBrowserWidget::OnMaterialAdded()
 {
-    if (event->type() != QEvent::KeyPress || watched != m_ui->treeView)
+    if (m_delayedSelection)
     {
-        return QWidget::eventFilter(watched, event);
-    }
+        SetSelectedItem(m_delayedSelection, nullptr, true);
 
-    QKeyEvent* ev = static_cast<QKeyEvent*>(event);
-
-    if (ev->matches(QKeySequence::Copy))
-    {
-        OnCopy();   // Ctrl+C
+        // Force update the material dialog
+        if (m_pListener)
+        {
+            m_pListener->OnBrowserSelectItem(GetCurrentMaterial(), true);
+        }
     }
-    else if (ev->matches(QKeySequence::Paste))
-    {
-        OnPaste(); // Ctrl+V
-    }
-    else if (ev->matches(QKeySequence::Cut))
-    {
-        OnCut(); // Ctrl+X
-    }
-    else if (ev->key() == Qt::Key_D && ev->modifiers() == Qt::ControlModifier)
-    {
-        OnDuplicate(); // Ctrl+D
-    }
-    else if (ev->matches(QKeySequence::Delete))
-    {
-        DeleteItem();
-    }
-    else if (ev->key() == Qt::Key_F2)
-    {
-        OnRenameItem();
-    }
-    else if (ev->key() == Qt::Key_Insert)
-    {
-        OnAddNewMaterial();
-    }
-    else
-    {
-        return QWidget::eventFilter(watched, event);
-    }
-    return true;
 }
 
 void MaterialBrowserWidget::OnSubMaterialSelectedInPreviewPane(const QModelIndex& current, const QModelIndex& previous)
@@ -1763,6 +1740,10 @@ void MaterialBrowserWidget::expandAllNotMatchingIndexes(const QModelIndex& paren
     }
 }
 
+void MaterialBrowserWidget::MaterialAddFinished()
+{
+    emit materialAdded();
+}
 
 void MaterialBrowserWidget::MaterialFinishedProcessing(_smart_ptr<CMaterial> material, const QPersistentModelIndex& filterModelIndex)
 {

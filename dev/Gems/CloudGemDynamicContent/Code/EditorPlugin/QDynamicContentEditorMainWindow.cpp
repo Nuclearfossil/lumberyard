@@ -409,7 +409,7 @@ namespace DynamicContent
 
     void QCreateNewManifestDialog::SetManifestNameRegExp()
     {
-        manifestNameEdit->setValidator(new QRegExpValidator(QRegExp("^[-0-9a-zA-Z!_.]*$")));
+        manifestNameEdit->setValidator(new QRegExpValidator(QRegExp("^[-0-9a-zA-Z_][-0-9a-zA-Z!_.]*$")));
     }
 
     QString QCreateNewManifestDialog::ManifestName()
@@ -434,10 +434,21 @@ namespace DynamicContent
 
         createNewManifestDialog->SetManifestNameRegExp();
         int execCode = createNewManifestDialog->exec();
-        auto newName = createNewManifestDialog->ManifestName();
 
-        if (execCode > 0)
+        QString newName;
+
+        while (execCode > 0)
         {
+            newName = createNewManifestDialog->ManifestName();
+            if (newName.length()==0)
+            {
+                auto nameMissing = QString(tr("Please enter a name for the manifest."));
+                auto reply = QMessageBox::information(this,
+                    tr("Attention"),
+                    nameMissing);
+                execCode = createNewManifestDialog->exec();
+                continue;
+            }
             QVariantList* selectedPlatformTypes = new QVariantList();
             m_dataRetainer.enqueue(selectedPlatformTypes);
             QList<QCheckBox*> checkBoxList = createNewManifestDialog->findChildren<QCheckBox*>();
@@ -450,8 +461,9 @@ namespace DynamicContent
             m_manifestStatus->m_currentlySelectedManifestName = newName + ".json";
             m_manifestStatus->m_fullPathToManifest = cbManifestSelection->currentData().toString();
             PythonExecute(COMMAND_NEW_MANIFEST, args);
+            break;
         }
-        else
+        if(execCode <= 0)
         {
             SelectCurrentManifest();
         }
@@ -1227,6 +1239,11 @@ namespace DynamicContent
             if (reply == QMessageBox::Yes)
             {
                 auto pakItem = m_packagesModel->itemFromIndex(pakIndex);
+                if (!pakItem)
+                {
+                    AZ_Warning("Dynamic Content Editor", false, "Item already deleted");
+                    return;
+                }
                 auto fileEntry = pakItem->text();
                 auto platformIndex = m_packagesModel->index(pakIndex.row(), PackagesModel::ColumnName::Platform, pakIndex.parent());
                 auto platformItem = m_packagesModel->itemFromIndex(platformIndex);

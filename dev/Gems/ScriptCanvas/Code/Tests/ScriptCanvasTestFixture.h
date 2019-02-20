@@ -27,7 +27,9 @@
 #include <AzCore/Memory/MemoryComponent.h>
 #include <AzCore/Asset/AssetManagerComponent.h>
 #include <ScriptCanvas/SystemComponent.h>
+#include <Asset/RuntimeAssetSystemComponent.h>
 #include <AzFramework/IO/LocalFileIO.h>
+#include <ScriptCanvas/Core/Connection.h>
 
 // disable test bodies to see if there's anything wrong with the system or test framework not related to ScriptCanvas testing
 #define TEST_BODIES_ENABLED 1 // 1 = enabled by default, 0 = disabled by default
@@ -40,6 +42,9 @@
 #else
 #define RETURN_IF_TEST_BODIES_ARE_DISABLED(isException) if (isException) { return; }
 #endif
+
+#define SC_EXPECT_DOUBLE_EQ(candidate, reference) EXPECT_NEAR(candidate, reference, 0.001)
+#define SC_EXPECT_FLOAT_EQ(candidate, reference) EXPECT_NEAR(candidate, reference, 0.001f)
 
 namespace ScriptCanvasTests
 {
@@ -94,10 +99,12 @@ namespace ScriptCanvasTests
 
             s_application->RegisterComponentDescriptor(ScriptCanvasTests::TestComponent::CreateDescriptor());
             s_application->RegisterComponentDescriptor(TraceMessageComponent::CreateDescriptor());
+            s_application->RegisterComponentDescriptor(TestNodes::TestResult::CreateDescriptor());
 
             systemEntity->CreateComponent<AZ::MemoryComponent>();
             systemEntity->CreateComponent<AZ::AssetManagerComponent>();
             systemEntity->CreateComponent<ScriptCanvas::SystemComponent>();
+            systemEntity->CreateComponent<ScriptCanvas::RuntimeAssetSystemComponent>();
             systemEntity->CreateComponent<TraceMessageComponent>();
 
             systemEntity->Init();
@@ -139,19 +146,10 @@ namespace ScriptCanvasTests
                 AZ::IO::FileIOBase::SetInstance(m_fileIO.get());
             }
             AZ_Assert(AZ::IO::FileIOBase::GetInstance(), "File IO was not properly installed");
-
-            TestNodes::TestResult::Reflect(m_serializeContext);
-            TestNodes::TestResult::Reflect(m_behaviorContext);
         }
 
         void TearDown() override
         {
-            m_serializeContext->EnableRemoveReflection();
-            TestNodes::TestResult::Reflect(m_serializeContext);
-            m_serializeContext->DisableRemoveReflection();
-            m_behaviorContext->EnableRemoveReflection();
-            TestNodes::TestResult::Reflect(m_behaviorContext);
-            m_behaviorContext->DisableRemoveReflection();
             AZ::IO::FileIOBase::SetInstance(nullptr);
             m_fileIO = nullptr;
         }
@@ -159,7 +157,7 @@ namespace ScriptCanvasTests
         AZStd::unique_ptr<AZ::IO::FileIOBase> m_fileIO;
         AZ::SerializeContext* m_serializeContext;
         AZ::BehaviorContext* m_behaviorContext;
-
+        UnitTestEntityContext m_entityContext;
     };
 
     class AsyncScriptCanvasTestFixture

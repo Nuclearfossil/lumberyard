@@ -40,6 +40,14 @@ namespace AzToolsFramework
     class LinearManipulator;
 
     /**
+     * State of overall manipulator manager.
+     */
+    struct ManipulatorManagerState
+    {
+        bool m_interacting;
+    };
+
+    /**
      * This class serves to manage all relevant mouse events and coordinate all registered manipulators to function properly.
      * ManipulatorManager does not manage the life cycle of specific manipulators. The users of manipulators are responsible
      * for creating and deleting them at right time, as well as registering and unregistering accordingly.
@@ -85,6 +93,8 @@ namespace AzToolsFramework
         void CheckModifierKeysChanged(
             ViewportInteraction::KeyboardModifiers keyboardModifiers,
             const ViewportInteraction::MousePick& mousePick);
+
+        bool Interacting() const { return m_activeManipulator != nullptr; }
 
     private:
         /**

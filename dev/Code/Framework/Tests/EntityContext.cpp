@@ -10,7 +10,7 @@
 *
 */
 
-#include "TestTypes.h"
+#include <Tests/TestTypes.h>
 
 #include <AzCore/Math/Uuid.h>
 #include <AzCore/Component/ComponentApplication.h>
@@ -36,6 +36,12 @@ namespace UnitTest
         EntityContextBasicTest()
             : AllocatorsFixture(15, false)
         {
+        }
+
+        void SetUp() override
+        {
+            AllocatorsFixture::SetUp();
+
             AllocatorInstance<PoolAllocator>::Create();
             AllocatorInstance<ThreadPoolAllocator>::Create();
 
@@ -43,12 +49,18 @@ namespace UnitTest
             Data::AssetManager::Create(desc);
         }
 
-        ~EntityContextBasicTest()
+        virtual ~EntityContextBasicTest()
+        {
+        }
+
+        void TearDown() override
         {
             Data::AssetManager::Destroy();
 
             AllocatorInstance<PoolAllocator>::Destroy();
             AllocatorInstance<ThreadPoolAllocator>::Destroy();
+
+            AllocatorsFixture::TearDown();
         }
 
         void run()
@@ -56,7 +68,7 @@ namespace UnitTest
             ComponentApplication app;
             ComponentApplication::Descriptor desc;
             desc.m_useExistingAllocator = true;
-            app.Create(desc);
+            AZ::Entity* systemEntity = app.Create(desc);
 
             Data::AssetManager::Instance().RegisterHandler(aznew SliceAssetHandler(app.GetSerializeContext()), AZ::AzTypeInfo<AZ::SliceAsset>::Uuid());
 
@@ -99,6 +111,7 @@ namespace UnitTest
             context.GetRootSlice()->GetEntities(entities);
             AZ_TEST_ASSERT(entities.size() == 1);
 
+            delete systemEntity;
             app.Destroy();
         }
 
@@ -119,7 +132,7 @@ namespace UnitTest
             (void)sliceAssetId;
             (void)instance;
             ++m_prefabSuccesses;
-            prefabResults = instance.second->GetInstantiated()->m_entities;
+            prefabResults = instance.GetInstance()->GetInstantiated()->m_entities;
         }
 
         void OnSliceInstantiationFailed(const AZ::Data::AssetId& sliceAssetId)

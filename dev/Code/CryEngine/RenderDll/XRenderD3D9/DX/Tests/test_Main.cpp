@@ -9,7 +9,7 @@
 * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 *
 */
-#include "stdafx.h"
+#include "StdAfx.h"
 #include <AzTest/AzTest.h>
 #include <AzCore/Memory/SystemAllocator.h>
 #include <AzCore/Memory/OSAllocator.h>
@@ -26,8 +26,9 @@ namespace
         void SetupEnvironment() override
         {
             // required memory management
-            AZ::AllocatorInstance<AZ::SystemAllocator>::Create();
             AZ::AllocatorInstance<AZ::OSAllocator>::Create();
+            AZ::AllocatorInstance<AZ::SystemAllocator>::Create();
+            
             // For some reason there's always an assert in ~AllocatorManager() after running the tests,
             // even though we call Destroy on both allocators in the TeardownEnvironment function,
             // so allow allocator leaking here to enable the tests to run without issue
@@ -36,8 +37,8 @@ namespace
 
         void TeardownEnvironment() override
         {           
-            AZ::AllocatorInstance<AZ::OSAllocator>::Destroy();
             AZ::AllocatorInstance<AZ::SystemAllocator>::Destroy();
+            AZ::AllocatorInstance<AZ::OSAllocator>::Destroy();
         }
     private:
     };

@@ -14,8 +14,6 @@
 // Description : to get some defines available in every CryEngine project
 
 
-#ifndef CRYINCLUDE_CRYCOMMON_PROJECTDEFINES_H
-#define CRYINCLUDE_CRYCOMMON_PROJECTDEFINES_H
 #pragma once
 
 
@@ -31,12 +29,11 @@
 #define PROJECTDEFINES_H_SECTION_STATS_AGENT 1
 #define PROJECTDEFINES_H_SECTION_TRAITS 2
 #define PROJECTDEFINES_H_SECTION_VTX_IDX 3
-#define PROJECTDEFINES_H_SECTION_CAPTURE_REPLAY 3
 #endif
 
 #if defined(AZ_RESTRICTED_PLATFORM)
 #define AZ_RESTRICTED_SECTION PROJECTDEFINES_H_SECTION_STATS_AGENT
-#include AZ_RESTRICTED_FILE(ProjectDefines_h)
+#include AZ_RESTRICTED_FILE(ProjectDefines_h, AZ_RESTRICTED_PLATFORM)
 #elif defined(WIN32) || defined(WIN64)
 #if !defined(_RELEASE) || defined(PERFORMANCE_BUILD)
 #define ENABLE_STATS_AGENT
@@ -59,7 +56,7 @@ typedef uint16 vtx_idx;
 #define AZ_RESTRICTED_SECTION_IMPLEMENTED
 #elif defined(AZ_RESTRICTED_PLATFORM)
 #define AZ_RESTRICTED_SECTION PROJECTDEFINES_H_SECTION_VTX_IDX
-#include AZ_RESTRICTED_FILE(ProjectDefines_h)
+#include AZ_RESTRICTED_FILE(ProjectDefines_h, AZ_RESTRICTED_PLATFORM)
 #endif
 #if defined(AZ_RESTRICTED_SECTION_IMPLEMENTED)
 #undef AZ_RESTRICTED_SECTION_IMPLEMENTED
@@ -101,33 +98,14 @@ typedef uint32 vtx_idx;
     #define USE_HTTP_WEBSOCKETS 0
 #endif
 
-#if !defined(RESOURCE_COMPILER)
-    #if defined(WIN32)
-        #define CAPTURE_REPLAY_LOG 1
-    #elif defined(AZ_RESTRICTED_PLATFORM)
-        #define AZ_RESTRICTED_SECTION PROJECTDEFINES_H_SECTION_CAPTURE_REPLAY
-        #include AZ_RESTRICTED_FILE(ProjectDefines_h)
-    #endif
-#endif
-
-#if defined(RESOURCE_COMPILER) || defined(_RELEASE)
-  #undef CAPTURE_REPLAY_LOG
-#endif
-
-#ifndef CAPTURE_REPLAY_LOG
-  #define CAPTURE_REPLAY_LOG 0
-#endif
 
 #if defined(AZ_RESTRICTED_PLATFORM)
 #define AZ_RESTRICTED_SECTION PROJECTDEFINES_H_SECTION_TRAITS
-#include AZ_RESTRICTED_FILE(ProjectDefines_h)
+#include AZ_RESTRICTED_FILE(ProjectDefines_h, AZ_RESTRICTED_PLATFORM)
 #else
 #define PROJECTDEFINES_H_TRAIT_DISABLE_MONOLITHIC_PROFILING_MARKERS 1
 #if !defined(LINUX) && !defined(APPLE)
 #define PROJECTDEFINES_H_TRAIT_ENABLE_SOFTCODE_SYSTEM 1
-#endif
-#if defined(LINUX) || defined(ANDROID) || defined(APPLE) || defined(WIN32)
-#define PROJECTDEFINES_H_TRAIT_USE_GLOBAL_BUCKET_ALLOCATOR 1
 #endif
 #if defined(WIN32) || defined(WIN64) || defined(LINUX) || defined(APPLE)
 #define PROJECTDEFINES_H_TRAIT_USE_GPU_PARTICLES 1
@@ -144,9 +122,7 @@ typedef uint32 vtx_idx;
 #define SUPPORT_RSA_PAK_SIGNING                                             //RSA signature verification
 #endif
 
-#if PROJECTDEFINES_H_TRAIT_USE_GLOBAL_BUCKET_ALLOCATOR
 #define USE_GLOBAL_BUCKET_ALLOCATOR
-#endif
 
 #ifdef IS_PROSDK
 #   define USING_TAGES_SECURITY                 // Wrapper for TGVM security
@@ -172,18 +148,6 @@ typedef uint32 vtx_idx;
 
 #if !defined(PHYSICS_STACK_SIZE)
 # define PHYSICS_STACK_SIZE (128U << 10)
-#endif
-
-#if !defined(USE_LEVEL_HEAP)
-#define USE_LEVEL_HEAP 0
-#endif
-
-#if USE_LEVEL_HEAP && !defined(_RELEASE)
-#define TRACK_LEVEL_HEAP_USAGE 1
-#endif
-
-#ifndef TRACK_LEVEL_HEAP_USAGE
-#define TRACK_LEVEL_HEAP_USAGE 0
 #endif
 
 #if (!defined(_RELEASE) || defined(PERFORMANCE_BUILD)) && !defined(RESOURCE_COMPILER)
@@ -227,7 +191,7 @@ typedef uint32 vtx_idx;
 #endif
 
 // Reflect texture slot information - only used in the editor
-#if defined(WIN32) || defined(WIN64)
+#if defined(WIN32) || defined(WIN64) || defined(AZ_PLATFORM_APPLE_OSX)
 #define SHADER_REFLECT_TEXTURE_SLOTS 1
 #else
 #define SHADER_REFLECT_TEXTURE_SLOTS 0
@@ -334,9 +298,6 @@ typedef uint32 vtx_idx;
 // Modules   : Renderer, Engine
 // Platform  : DX11
 #if !defined(RENDERNODES_LEAN_AND_MEAN)
-    #if defined(WIN32)
-        #define FEATURE_SVO_GI_ALLOW_HQ
-    #endif
     #if PROJECTDEFINES_H_TRAIT_USE_SVO_GI
         #define FEATURE_SVO_GI
     #endif
@@ -349,7 +310,7 @@ typedef uint32 vtx_idx;
 
 #include "ProjectDefinesInclude.h"
 
-#if defined(SOFTCODE_ENABLED) && defined(NOT_USE_CRY_MEMORY_MANAGER)
+#if defined(SOFTCODE_ENABLED)
     #error "SoftCode currently relies on CryMemoryManager being enabled. Either build without SoftCode support, or enable CryMemoryManager."
 #endif
 
@@ -396,5 +357,3 @@ typedef uint32 vtx_idx;
 
 // The maximum number of joints in an animation
 #define MAX_JOINT_AMOUNT 1024
-
-#endif // CRYINCLUDE_CRYCOMMON_PROJECTDEFINES_H

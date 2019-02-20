@@ -171,7 +171,7 @@ private:
     {
         auto compare = [column](const QVariantMap& v1, const QVariantMap& v2)
             {
-                return v1[column] < v2[column];
+                return v1[column].toString() < v2[column].toString();
             };
 
         qSort(list.begin(), list.end(), compare);
@@ -325,7 +325,9 @@ private:
 
     };
 
-    static EmptyPendingChangeProxyModel s_EmptyPendingChangeProxyModel;
+    EmptyPendingChangeProxyModel m_emptyPendingChangeProxyModel;
+
+    EmptyPendingChangeProxyModel* GetEmptyPendingChangeProxyModel() { return &m_emptyPendingChangeProxyModel; }
 
     class PendingChangesProxyModel
         : public QSortFilterProxyModel
@@ -340,7 +342,7 @@ private:
             setFilterKeyColumn(PendingActionColumn);
             setFilterRole(PendingChangeFilterRole);
             setFilterFixedString("YES");
-            setSourceModel(&s_EmptyPendingChangeProxyModel);
+            setSourceModel(m_proxiedModel->GetEmptyPendingChangeProxyModel());
             connect(m_proxiedModel, &StackResourcesModel::modelReset, this, &PendingChangesProxyModel::OnProxiedModelReset);
             m_proxiedModel->Refresh(true); // force
         }
@@ -358,7 +360,7 @@ private:
             }
             else
             {
-                setSourceModel(&s_EmptyPendingChangeProxyModel);
+                setSourceModel(m_proxiedModel->GetEmptyPendingChangeProxyModel());
             }
         }
 

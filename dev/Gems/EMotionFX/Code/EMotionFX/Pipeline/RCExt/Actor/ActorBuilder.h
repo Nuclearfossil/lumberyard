@@ -14,7 +14,7 @@
 #include <SceneAPI/SceneCore/Components/ExportingComponent.h>
 #include <SceneAPI/SceneCore/Containers/Scene.h>
 
-#include <RCext/CoordinateSystemConverter.h>
+#include <RCExt/CoordinateSystemConverter.h>
 
 
 namespace AZ
@@ -24,6 +24,7 @@ namespace AZ
         namespace DataTypes
         {
             class IMeshData;
+            class IBlendShapeRule;
         }
     }
     namespace GFxFramework
@@ -123,12 +124,11 @@ namespace EMotionFX
 
             void ExtractActorSettings(const Group::IActorGroup& actorGroup, ActorSettings& outSettings);
 
-            void GatherGlobalTransform(const AZ::SceneAPI::Containers::SceneGraph& graph, const AZ::SceneAPI::Containers::SceneGraph::NodeIndex& nodeIndex, AZ::Transform& outTransform);
-
             bool GetMaterialInfoForActorGroup(const ActorBuilderContext& context);
             void SetupMaterialDataForMesh(const ActorBuilderContext& context, const AZ::SceneAPI::Containers::SceneGraph::NodeIndex& meshNodeIndex);
 
             void GetNodeIndicesOfSelectedMeshes(ActorBuilderContext& context, NodeIndexSet& meshNodeIndexSet) const;
+            bool GetIsMorphed(const AZ::SceneAPI::Containers::SceneGraph& graph, const AZ::SceneAPI::Containers::SceneGraph::NodeIndex& nodeIndex, const AZ::SceneAPI::DataTypes::IBlendShapeRule* morphTargetRule) const;
 
         private:
             AZStd::shared_ptr<AZ::GFxFramework::IMaterialGroup> m_materialGroup;

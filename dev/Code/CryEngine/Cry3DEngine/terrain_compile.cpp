@@ -295,7 +295,7 @@ void CTerrain::SaveTables(byte*& pData, int& nDataSize, std::vector<struct IStat
             {
                 SNameChunk tmp;
                 assert(strlen(rTable[dwI] ? rTable[dwI]->GetName() : "") < sizeof(tmp.szFileName));
-                strcpy(tmp.szFileName, rTable[dwI] ? rTable[dwI]->GetName() : "");
+                azstrcpy(tmp.szFileName, AZ_ARRAY_SIZE(tmp.szFileName), rTable[dwI] ? rTable[dwI]->GetName() : "");
                 AddToPtr(pData, nDataSize, tmp, eEndian);
             }
         }
@@ -612,7 +612,6 @@ bool CTerrain::Load_T(T& f, int& nDataSize, STerrainChunkHeader* pTerrainChunkHe
         PodArray<StatInstGroupChunk> lstStatInstGroupChunkFileChunks;
 
         { // get vegetation objects count
-            MEMSTAT_CONTEXT(EMemStatContextTypes::MSC_Terrain, 0, "Vegetation");
             LOADING_TIME_PROFILE_SECTION_NAMED("Vegetation");
 
             int nObjectsCount = 0;
@@ -652,7 +651,6 @@ bool CTerrain::Load_T(T& f, int& nDataSize, STerrainChunkHeader* pTerrainChunkHe
         pStatObjTable = new std::vector < IStatObj* >;
 
         { // get brush objects count
-            MEMSTAT_CONTEXT(EMemStatContextTypes::MSC_Terrain, 0, "Brushes");
             LOADING_TIME_PROFILE_SECTION_NAMED("Brushes");
 
             int nObjectsCount = 0;

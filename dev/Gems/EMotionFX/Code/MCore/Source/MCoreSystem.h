@@ -24,10 +24,8 @@ namespace MCore
     // forward declarations
     class LogManager;
     class IDGenerator;
-    class StringIDGenerator;
-    class AzStringIdGenerator;
+    class StringIdPool;
     class AttributeFactory;
-    class AttributePool;
     class JobList;
     class JobManager;
     class JobList;
@@ -114,20 +112,13 @@ namespace MCore
          * Get the string based ID generator.
          * @result A reference to the string based ID generator.
          */
-        MCORE_INLINE StringIDGenerator& GetStringIDGenerator()          { return *mStringIDGenerator; }
-        MCORE_INLINE AzStringIdGenerator& GetAzStringIdGenerator()      { return *mAzStringIdGenerator; }
+        MCORE_INLINE StringIdPool& GetStringIdPool()          { return *mStringIdPool; }
 
         /**
          * Get the attribute factory.
          * @result A reference to the attribute factory, which is used to create attributes of a certain type.
          */
         MCORE_INLINE AttributeFactory& GetAttributeFactory()            { return *mAttributeFactory; }
-
-        /**
-         * Get the attribute pool.
-         * @result A reference to the attribute pool, which is used to prevent large number of small allocations when creating many attributes.
-         */
-        MCORE_INLINE AttributePool& GetAttributePool()                  { return *mAttributePool; }
 
         /**
          * Get the memory tracker.
@@ -154,10 +145,8 @@ namespace MCore
     private:
         LogManager*             mLogManager;        /**< The log manager. */
         IDGenerator*            mIDGenerator;       /**< The ID generator. */
-        StringIDGenerator*      mStringIDGenerator; /**< The string based ID generator. */
-        AzStringIdGenerator*    mAzStringIdGenerator;   /**< The string based ID generator. */
+        StringIdPool*           mStringIdPool; /**< The string based ID generator. */
         AttributeFactory*       mAttributeFactory;  /**< The attribute factory. */
-        AttributePool*          mAttributePool;     /**< The attribute pooling system. */
         JobManager*             mJobManager;        /**< The multithread job manager. */
         MemoryTracker*          mMemoryTracker;     /**< The memory tracker. */
         Mutex*                  mMemoryMutex;
@@ -213,12 +202,10 @@ namespace MCore
         return *(gMCore.Get());
     }
 
-    MCORE_INLINE LogManager& GetLogManager()                   { return gMCore.Get()->GetLogManager(); }
-    MCORE_INLINE IDGenerator& GetIDGenerator()                 { return gMCore.Get()->GetIDGenerator(); }
-    MCORE_INLINE StringIDGenerator& GetStringIDGenerator()     { return gMCore.Get()->GetStringIDGenerator(); }
-    MCORE_INLINE AzStringIdGenerator& GetAzStringIdGenerator() { return gMCore.Get()->GetAzStringIdGenerator(); }
-    MCORE_INLINE AttributeFactory& GetAttributeFactory()       { return gMCore.Get()->GetAttributeFactory(); }
-    MCORE_INLINE AttributePool& GetAttributePool()             { return gMCore.Get()->GetAttributePool(); }
-    MCORE_INLINE JobManager& GetJobManager()                   { return gMCore.Get()->GetJobManager(); }
-    MCORE_INLINE MemoryTracker& GetMemoryTracker()             { return gMCore.Get()->GetMemoryTracker(); }
+    MCORE_INLINE LogManager& GetLogManager()                   { return GetMCore().GetLogManager(); }
+    MCORE_INLINE IDGenerator& GetIDGenerator()                 { return GetMCore().GetIDGenerator(); }
+    MCORE_INLINE StringIdPool& GetStringIdPool()               { return GetMCore().GetStringIdPool(); }
+    MCORE_INLINE AttributeFactory& GetAttributeFactory()       { return GetMCore().GetAttributeFactory(); }
+    MCORE_INLINE JobManager& GetJobManager()                   { return GetMCore().GetJobManager(); }
+    MCORE_INLINE MemoryTracker& GetMemoryTracker()             { return GetMCore().GetMemoryTracker(); }
 } // namespace MCore

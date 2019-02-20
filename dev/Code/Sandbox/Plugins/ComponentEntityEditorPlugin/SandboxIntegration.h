@@ -16,6 +16,8 @@
 #include <AzToolsFramework/API/ToolsApplicationAPI.h>
 #include <AzToolsFramework/API/HyperGraphBus.h>
 #include <AzToolsFramework/UI/PropertyEditor/PropertyEditorAPI.h>
+#include <AzToolsFramework/UI/Slice/SliceOverridesNotificationWindowManager.hxx>
+#include <AzToolsFramework/UI/Slice/SliceOverridesNotificationWindow.hxx>
 #include <AzToolsFramework/Entity/EditorEntityContextBus.h>
 #include <AzCore/Slice/SliceBus.h>
 #include <AzCore/Slice/SliceComponent.h>
@@ -125,15 +127,26 @@ private:
     AZ::EntityId CreateNewEntityAtPosition(const AZ::Vector3& /*pos*/, AZ::EntityId parentId = AZ::EntityId()) override;
     QWidget* GetMainWindow() override;
     IEditor* GetEditor() override;
+    bool GetUndoSliceOverrideSaveValue() override;
+    bool GetShowCircularDependencyError() override;
+    void SetShowCircularDependencyError(const bool& showCircularDependencyError) override;
     void SetEditTool(const char* tool) override;
     void LaunchLuaEditor(const char* files) override;
     bool IsLevelDocumentOpen() override;
+    AZStd::string GetLevelName() override;
     AZStd::string SelectResource(const AZStd::string& resourceType, const AZStd::string& previousValue) override;
     void GenerateNavigationArea(const AZStd::string& name, const AZ::Vector3& position, const AZ::Vector3* points, size_t numPoints, float height) override;
-    AZStd::vector<AZStd::string> GetAgentTypes() override;
+    virtual const char* GetDefaultAgentNavigationTypeName() override;
+    float CalculateAgentNavigationRadius(const char* agentTypeName) override;
     void OpenPinnedInspector(const AzToolsFramework::EntityIdList& entities) override;
     void ClosePinnedInspector(AzToolsFramework::EntityPropertyEditor* editor) override;
+    AZStd::vector<AZStd::string> GetAgentTypes() override;
     void GoToSelectedOrHighlightedEntitiesInViewports() override;
+    void GoToSelectedEntitiesInViewports() override;
+    AZ::Vector3 GetWorldPositionAtViewportCenter() override;
+    void ClearRedoStack() override;
+
+    //////////////////////////////////////////////////////////////////////////
 
     //////////////////////////////////////////////////////////////////////////
     // AzToolsFramework::EditorEvents::Bus::Handler overrides
@@ -161,17 +174,21 @@ private:
     //////////////////////////////////////////////////////////////////////////
     // AzToolsFramework::EditorRequests::Bus::Handler overrides
     void SetColor(float r, float g, float b, float a) override;
+    void SetColor(const AZ::Color& color) override;
     void SetColor(const AZ::Vector4& color) override;
     void SetAlpha(float a) override;
     void DrawQuad(const AZ::Vector3& p1, const AZ::Vector3& p2, const AZ::Vector3& p3, const AZ::Vector3& p4) override;
     void DrawQuadGradient(const AZ::Vector3& p1, const AZ::Vector3& p2, const AZ::Vector3& p3, const AZ::Vector3& p4, const AZ::Vector4& firstColor, const AZ::Vector4& secondColor) override;
     void DrawTri(const AZ::Vector3& p1, const AZ::Vector3& p2, const AZ::Vector3& p3) override;
+    void DrawTriangles(const AZStd::vector<AZ::Vector3>& vertices, const AZ::Color& color) override;
+    void DrawTrianglesIndexed(const AZStd::vector<AZ::Vector3>& vertices, const AZStd::vector<AZ::u32>& indices, const AZ::Color& color) override;
     void DrawWireBox(const AZ::Vector3& min, const AZ::Vector3& max) override;
     void DrawSolidBox(const AZ::Vector3& min, const AZ::Vector3& max) override;
     void DrawSolidOBB(const AZ::Vector3& center, const AZ::Vector3& axisX, const AZ::Vector3& axisY, const AZ::Vector3& axisZ, const AZ::Vector3& halfExtents) override;
     void DrawPoint(const AZ::Vector3& p, int nSize) override;
     void DrawLine(const AZ::Vector3& p1, const AZ::Vector3& p2) override;
     void DrawLine(const AZ::Vector3& p1, const AZ::Vector3& p2, const AZ::Vector4& col1, const AZ::Vector4& col2) override;
+    void DrawLines(const AZStd::vector<AZ::Vector3>& lines, const AZ::Color& color) override;
     void DrawPolyLine(const AZ::Vector3* pnts, int numPoints, bool cycled) override;
     void DrawWireQuad2d(const AZ::Vector2& p1, const AZ::Vector2& p2, float z) override;
     void DrawLine2d(const AZ::Vector2& p1, const AZ::Vector2& p2, float z) override;
@@ -235,8 +252,6 @@ private:
         AZ::SliceComponent::EntityAncestorList ancestors,
         AZ::Data::AssetId targetAncestorId,
         bool affectEntireHierarchy);
-    void ContextMenu_DetachSliceEntities(AzToolsFramework::EntityIdList entities);
-    void ContextMenu_DetachSliceInstances(AzToolsFramework::EntityIdList entities);
     void ContextMenu_Duplicate();
     void ContextMenu_DeleteSelected();
     void ContextMenu_ResetToSliceDefaults(AzToolsFramework::EntityIdList entities);
@@ -278,12 +293,13 @@ private:
 private:
     void SetupFileExtensionMap();
     void SetupSliceContextMenu(QMenu* menu);
-    void SetupSliceContextMenu_Push(QMenu* menu, const AzToolsFramework::EntityIdList& selectedEntities, const AZ::u32 numEntitiesInSlices);
+    void SetupSliceContextMenu_Modify(QMenu* menu, const AzToolsFramework::EntityIdList& selectedEntities, const AZ::u32 numEntitiesInSlices);
     void SetupFlowGraphContextMenu(QMenu* menu);
     void SetupScriptCanvasContextMenu(QMenu* menu);
+    void SaveSlice(const bool& QuickPushToFirstLevel);
+    void GetEntitiesInSlices(const AzToolsFramework::EntityIdList& selectedEntities, AZ::u32& entitiesInSlices, AZStd::vector<AZ::SliceComponent::SliceInstanceAddress>& sliceInstances);
 
-    //! \return whether user confirmed detach, false if cancelled
-    bool ConfirmDialog_Detach(const QString& title, const QString& text);
+    void GoToEntitiesInViewports(const AzToolsFramework::EntityIdList& entityIds);
 
     typedef AZStd::unordered_map<AZ::u32, IFileUtil::ECustomFileType> ExtensionMap;
     ExtensionMap m_extensionToFileType;
@@ -294,7 +310,11 @@ private:
     int m_inObjectPickMode;
     short m_startedUndoRecordingNestingLevel;   // used in OnBegin/EndUndo to ensure we only accept undo's we started recording
 
+    AzToolsFramework::SliceOverridesNotificationWindowManager* m_notificationWindowManager;
+
     DisplayContext* m_dc;
+
+    AZStd::unique_ptr<class ComponentEntityDebugPrinter> m_entityDebugPrinter;
 
     const AZStd::string m_defaultComponentIconLocation = "Editor/Icons/Components/Component_Placeholder.png";
     const AZStd::string m_defaultComponentViewportIconLocation = "Editor/Icons/Components/Viewport/Component_Placeholder.png";
@@ -324,17 +344,22 @@ public:
 
     void Undo(bool bUndo = true) override
     {
-        if (bUndo)
+        // Always run the undo even if the flag was set to false, that just means that undo wasn't expressly desired, but can be used in cases of canceling the current super undo.
+
+        // Restore previous focus after applying the undo.
+        QPointer<QWidget> w = QApplication::focusWidget();
+
+        AzToolsFramework::ToolsApplicationRequestBus::Broadcast(&AzToolsFramework::ToolsApplicationRequestBus::Events::UndoPressed);
+
+        // Slice the redo stack if this wasn't due to explicit undo command
+        if (!bUndo)
         {
-            // Restore previous focus after applying the undo.
-            QPointer<QWidget> w = QApplication::focusWidget();
+            AzToolsFramework::ToolsApplicationRequestBus::Broadcast(&AzToolsFramework::ToolsApplicationRequestBus::Events::FlushRedo);
+        }
 
-            EBUS_EVENT(AzToolsFramework::ToolsApplicationRequests::Bus, UndoPressed);
-
-            if (!w.isNull())
-            {
-                w->setFocus(Qt::OtherFocusReason);
-            }
+        if (!w.isNull())
+        {
+            w->setFocus(Qt::OtherFocusReason);
         }
     }
 
@@ -343,7 +368,7 @@ public:
         // Restore previous focus after applying the undo.
         QPointer<QWidget> w = QApplication::focusWidget();
 
-        EBUS_EVENT(AzToolsFramework::ToolsApplicationRequests::Bus, RedoPressed);
+        AzToolsFramework::ToolsApplicationRequestBus::Broadcast(&AzToolsFramework::ToolsApplicationRequestBus::Events::RedoPressed);
 
         if (!w.isNull())
         {

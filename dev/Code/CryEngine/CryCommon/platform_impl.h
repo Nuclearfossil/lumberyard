@@ -14,8 +14,6 @@
 // Description : This file should only be included Once in DLL module.
 
 
-#ifndef CRYINCLUDE_CRYCOMMON_PLATFORM_IMPL_H
-#define CRYINCLUDE_CRYCOMMON_PLATFORM_IMPL_H
 #pragma once
 
 #include <platform.h>
@@ -24,6 +22,7 @@
 #include <ITestSystem.h>
 #include <CryExtension/Impl/RegFactoryNode.h>
 #include <CryExtension/Impl/ICryFactoryRegistryImpl.h>
+#include <IComponentFactory.h>
 #include <UnicodeFunctions.h>
 
 #include <AzCore/Debug/Profiler.h>
@@ -36,17 +35,18 @@
 #define PLATFORM_IMPL_H_SECTION_CRYLOWLATENCYSLEEP 2
 #define PLATFORM_IMPL_H_SECTION_CRYGETFILEATTRIBUTES 3
 #define PLATFORM_IMPL_H_SECTION_CRYSETFILEATTRIBUTES 4
-#define PLATFORM_IMPL_H_SECTION_LOADLIBRARY 5
 #endif
 
 #if !defined(AZ_MONOLITHIC_BUILD)
 SC_API struct SSystemGlobalEnvironment* gEnv = NULL;
+ComponentFactoryCreationNode* ComponentFactoryCreationNode::sm_head = nullptr;
+size_t ComponentFactoryCreationNode::sm_size = 0;
 #endif //AZ_MONOLITHIC_BUILD
 
 // Traits
 #if defined(AZ_RESTRICTED_PLATFORM)
 #define AZ_RESTRICTED_SECTION BITFIDDLING_H_SECTION_TRAITS
-#include AZ_RESTRICTED_FILE(platform_impl_h)
+#include AZ_RESTRICTED_FILE(platform_impl_h, AZ_RESTRICTED_PLATFORM)
 #elif defined(LINUX) || defined(APPLE)
 #define PLATFORM_IMPL_H_TRAIT_DEFINE_GLOBAL_SREGFACTORYNODE 1
 #endif
@@ -112,8 +112,11 @@ extern "C" DLL_EXPORT void ModuleInitISystem(ISystem* pSystem, const char* modul
     {
         gEnv = pSystem->GetGlobalEnvironment();
         assert(gEnv);
-
-        AZ::Environment::Attach(gEnv->pSharedEnvironment);
+        
+        if (!AZ::Environment::IsReady() || (AZ::Environment::GetInstance() != gEnv->pSharedEnvironment))
+        {
+            AZ::Environment::Attach(gEnv->pSharedEnvironment);
+        }
         AZ::Debug::ProfileModuleInit();
 
 #if !defined(AZ_MONOLITHIC_BUILD)
@@ -131,6 +134,21 @@ extern "C" DLL_EXPORT void ModuleInitISystem(ISystem* pSystem, const char* modul
 extern "C" DLL_EXPORT void ModuleShutdownISystem(ISystem* pSystem)
 {
     // Unregister with AZ environment.
+    AZ::Environment::Detach();
+}
+
+extern "C" DLL_EXPORT void InjectEnvironment(void* env)
+{
+    static bool injected = false;
+    if (!injected)
+    {
+        AZ::Environment::Attach(reinterpret_cast<AZ::EnvironmentInstance>(env));
+        injected = true;
+    }
+}
+
+extern "C" DLL_EXPORT void DetachEnvironment()
+{
     AZ::Environment::Detach();
 }
 
@@ -222,7 +240,7 @@ void CryLowLatencySleep(unsigned int dwMilliseconds)
     AZ_PROFILE_FUNCTION(AZ::Debug::ProfileCategory::System);
 #if defined(AZ_RESTRICTED_PLATFORM)
 #define AZ_RESTRICTED_SECTION PLATFORM_IMPL_H_SECTION_CRYLOWLATENCYSLEEP
-#include AZ_RESTRICTED_FILE(platform_impl_h)
+#include AZ_RESTRICTED_FILE(platform_impl_h, AZ_RESTRICTED_PLATFORM)
 #endif
 #if defined(AZ_RESTRICTED_SECTION_IMPLEMENTED)
 #undef AZ_RESTRICTED_SECTION_IMPLEMENTED
@@ -449,7 +467,7 @@ uint32 CryGetFileAttributes(const char* lpFileName)
     BOOL res;
 #if defined(AZ_RESTRICTED_PLATFORM)
 #define AZ_RESTRICTED_SECTION PLATFORM_IMPL_H_SECTION_CRYGETFILEATTRIBUTES
-#include AZ_RESTRICTED_FILE(platform_impl_h)
+#include AZ_RESTRICTED_FILE(platform_impl_h, AZ_RESTRICTED_PLATFORM)
 #endif
 #if defined(AZ_RESTRICTED_SECTION_IMPLEMENTED)
 #undef AZ_RESTRICTED_SECTION_IMPLEMENTED
@@ -464,7 +482,7 @@ bool CrySetFileAttributes(const char* lpFileName, uint32 dwFileAttributes)
 {
 #if defined(AZ_RESTRICTED_PLATFORM)
 #define AZ_RESTRICTED_SECTION PLATFORM_IMPL_H_SECTION_CRYSETFILEATTRIBUTES
-#include AZ_RESTRICTED_FILE(platform_impl_h)
+#include AZ_RESTRICTED_FILE(platform_impl_h, AZ_RESTRICTED_PLATFORM)
 #endif
 #if defined(AZ_RESTRICTED_SECTION_IMPLEMENTED)
 #undef AZ_RESTRICTED_SECTION_IMPLEMENTED
@@ -482,11 +500,6 @@ threadID CryGetCurrentThreadId()
 #endif // _WIN32
 
 #endif //AZ_MONOLITHIC_BUILD
-
-#if defined(AZ_RESTRICTED_PLATFORM)
-#define AZ_RESTRICTED_SECTION PLATFORM_IMPL_H_SECTION_LOADLIBRARY
-#include AZ_RESTRICTED_FILE(platform_impl_h)
-#endif
 
 #if defined(AZ_PLATFORM_WINDOWS) && (!defined(AZ_MONOLITHIC_BUILD) || defined(_LAUNCHER))
 int64 CryGetTicks()
@@ -603,4 +616,3 @@ _MS_ALIGN(64) uint32  BoxSides[0x40 * 8] = {
     0, 0, 0, 0, 0, 0, 0, 0, //3f
 };
 #endif // !AZ_MONOLITHIC_BUILD || _LAUNCHER
-#endif // CRYINCLUDE_CRYCOMMON_PLATFORM_IMPL_H

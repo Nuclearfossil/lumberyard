@@ -97,14 +97,12 @@ void UiSpawnerComponent::Reflect(AZ::ReflectContext* context)
     if (behaviorContext)
     {
         behaviorContext->EBus<UiSpawnerBus>("UiSpawnerBus")
-            ->Attribute(AZ::Script::Attributes::ExcludeFrom, AZ::Script::Attributes::ExcludeFlags::Preview)
             ->Event("Spawn", &UiSpawnerBus::Events::Spawn)
             ->Event("SpawnRelative", &UiSpawnerBus::Events::SpawnRelative)
             ->Event("SpawnAbsolute", &UiSpawnerBus::Events::SpawnViewport)
         ;
 
         behaviorContext->EBus<UiSpawnerNotificationBus>("UiSpawnerNotificationBus")
-            ->Attribute(AZ::Script::Attributes::ExcludeFrom, AZ::Script::Attributes::ExcludeFlags::Preview)
             ->Handler<BehaviorUiSpawnerNotificationBusHandler>()
         ;
     }
@@ -126,7 +124,7 @@ void UiSpawnerComponent::GetDependentServices(AZ::ComponentDescriptor::Dependenc
 UiSpawnerComponent::UiSpawnerComponent()
 {
     // Slice asset should load purely on-demand.
-    m_sliceAsset.SetFlags(static_cast<AZ::u8>(AZ::Data::AssetFlags::OBJECTSTREAM_NO_LOAD));
+    m_sliceAsset.SetAutoLoadBehavior(AZ::Data::AssetLoadBehavior::NoLoad);
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -185,19 +183,19 @@ AzFramework::SliceInstantiationTicket UiSpawnerComponent::SpawnSliceViewport(con
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void UiSpawnerComponent::OnEntityContextSlicePreInstantiate(const AZ::Data::AssetId& /*sliceAssetId*/, const AZ::SliceComponent::SliceInstanceAddress& /*sliceAddress*/)
 {
-    const AzFramework::SliceInstantiationTicket& ticket = (*UiGameEntityContextSliceInstantiationResultsBus::GetCurrentBusId());
+    const AzFramework::SliceInstantiationTicket ticket = (*UiGameEntityContextSliceInstantiationResultsBus::GetCurrentBusId());
     EBUS_EVENT_ID(GetEntityId(), UiSpawnerNotificationBus, OnSpawnBegin, ticket);
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void UiSpawnerComponent::OnEntityContextSliceInstantiated(const AZ::Data::AssetId& sliceAssetId, const AZ::SliceComponent::SliceInstanceAddress& sliceAddress)
 {
-    const AzFramework::SliceInstantiationTicket& ticket = (*UiGameEntityContextSliceInstantiationResultsBus::GetCurrentBusId());
+    const AzFramework::SliceInstantiationTicket ticket = (*UiGameEntityContextSliceInstantiationResultsBus::GetCurrentBusId());
 
     // Stop listening for this ticket (since it's done). We can have have multiple tickets in flight.
     UiGameEntityContextSliceInstantiationResultsBus::MultiHandler::BusDisconnect(ticket);
 
-    const AZ::SliceComponent::EntityList& entities = sliceAddress.second->GetInstantiated()->m_entities;
+    const AZ::SliceComponent::EntityList& entities = sliceAddress.GetInstance()->GetInstantiated()->m_entities;
 
     // first, send a notification of every individual entity that has been spawned (including top-level elements)
     AZStd::vector<AZ::EntityId> entityIds;

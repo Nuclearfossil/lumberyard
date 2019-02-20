@@ -110,17 +110,17 @@ namespace MCommon
         void RenderNormals(EMotionFX::Mesh* mesh, const MCore::Matrix& globalTM, bool vertexNormals, bool faceNormals, float vertexNormalsScale = 1.0f, float faceNormalsScale = 2.0f, const MCore::RGBAColor& colorVertexNormals = MCore::RGBAColor(0.0f, 1.0f, 0.0f), const MCore::RGBAColor& colorFaceNormals = MCore::RGBAColor(0.5f, 0.5f, 1.0f), bool directlyRender = false);
 
         /**
-         * Render tangents and binormals of the mesh.
+         * Render tangents and bitangents of the mesh.
          * @param mesh A poiner to the mesh which will be rendered.
          * @param globalTM The global transformation matrix of the node to which the given mesh belongs to.
-         * @param scale This parameter controls the length of the tangents and binormals. The default size of the tangents and binormals is one unit.
+         * @param scale This parameter controls the length of the tangents and bitangentss. The default size of the tangents and bitangents is one unit.
          * @param colorTangents The color of the tangents.
-         * @param mirroredBinormalColor The color of the mirrored binormals, so the ones that have a w value of -1.
-         * @param colorBiNormals The color of the face binormals.
+         * @param mirroredBitangentColor The color of the mirrored bitangents, so the ones that have a w value of -1.
+         * @param colorBitangent The color of the face bitangents.
          * @param directlyRender Will call the RenderLines() function internally in case it is set to true. If false
          *                       you have to make sure to call RenderLines() manually at the end of your custom render frame function.
          */
-        void RenderTangents(EMotionFX::Mesh* mesh, const MCore::Matrix& globalTM, float scale = 1.0f, const MCore::RGBAColor& colorTangents = MCore::RGBAColor(1.0f, 0.0f, 0.0f), const MCore::RGBAColor& mirroredBinormalColor = MCore::RGBAColor(1.0f, 1.0f, 0.0f), const MCore::RGBAColor& colorBiNormals = MCore::RGBAColor(1.0f, 1.0f, 1.0f), bool directlyRender = false);
+        void RenderTangents(EMotionFX::Mesh* mesh, const MCore::Matrix& globalTM, float scale = 1.0f, const MCore::RGBAColor& colorTangents = MCore::RGBAColor(1.0f, 0.0f, 0.0f), const MCore::RGBAColor& mirroredBitangentColor = MCore::RGBAColor(1.0f, 1.0f, 0.0f), const MCore::RGBAColor& colorBitangents = MCore::RGBAColor(1.0f, 1.0f, 1.0f), bool directlyRender = false);
 
         /**
          * Render the given axis aligned bounding box.
@@ -553,7 +553,7 @@ namespace MCommon
         /**
          * Rendering the normals or the tangents of a mesh need the global space transformed positions of the mesh.
          * To avoid recalculating them several times we do this at a central place. This function needs to be called before switching to a new mesh inside
-         * the render loop as well as before an animation update, so before calling any of the render normals, face normals, tangents and binormals functions.
+         * the render loop as well as before an animation update, so before calling any of the render normals, face normals, tangents and bitangents functions.
          */
         MCORE_INLINE void ResetCurrentMesh()                                                                                { mCurrentMesh = NULL; }
 
@@ -676,6 +676,8 @@ namespace MCommon
          */
         void RenderText(const char* text, uint32 textSize, const AZ::Vector3& globalPos, MCommon::Camera* camera, uint32 screenWidth, uint32 screenHeight, const MCore::RGBAColor& color);
 
+        void SetDevicePixelRatio(float devicePixelRatio)                                                { m_devicePixelRatio = devicePixelRatio; }
+
         virtual void EnableCulling(bool cullingEnabled) = 0;
         virtual bool GetCullingEnabled() = 0;
 
@@ -684,7 +686,9 @@ namespace MCommon
 
         virtual void SetDepthMaskWrite(bool writeEnabled) = 0;
 
-        //MCORE_INLINE void RenderText(uint32 x, uint32 y, const MCore::RGBAColor& color, float fontSize, bool centered, const char *fmt, ...)  { char buffer[8192]; buffer[8191]=0; _vsnprintf( buffer,8191, fmt, (char *)(&fmt+1) ); RenderText(x, y, screenHeight, buffer, color, fontSize, centered); }
+        void RenderWireframeBox(const AZ::Vector3& dimensions, const MCore::Matrix& globalTM, const MCore::RGBAColor& color, bool directlyRender = false);
+        void RenderWireframeSphere(float radius, const MCore::Matrix& globalTM, const MCore::RGBAColor& color, bool directlyRender = false);
+        void RenderWireframeCapsule(float radius, float height, const MCore::Matrix& globalTM, const MCore::RGBAColor& color, bool directlyRender = false);
 
     protected:
         /**
@@ -820,7 +824,9 @@ namespace MCommon
         Line2D*                         m2DLines;               /**< Array of 2D lines. */
         uint32                          mNum2DLines;            /**< The current number of 2D lines in the array. */
         static uint32                   mNumMax2DLines;         /**< The maximum capacity of the 2D line buffer. */
+        static float                    m_wireframeSphereSegmentCount;
 
+        float                           m_devicePixelRatio;
         VectorFont*                     mFont;                  /**< The vector font used to render text. */
 
         UtilMesh*                       mUnitSphereMesh;        /**< The preallocated and preconstructed sphere mesh used for rendering. */

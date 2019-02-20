@@ -22,8 +22,6 @@
 #include "IParticles.h"
 #include "CGFContent.h"
 #include "ObjMan.h"
-#include <IJobManager.h>
-#include <IJobManager_JobDelegator.h>
 #define SMALL_MESH_NUM_INDEX 30
 
 //////////////////////////////////////////////////////////////////////////
@@ -31,8 +29,6 @@ void CStatObj::PhysicalizeCompiled(CNodeCGF* pNode, int bAppend)
 {
     FUNCTION_PROFILER_3DENGINE;
     LOADING_TIME_PROFILE_SECTION;
-
-    MEMSTAT_CONTEXT(EMemStatContextTypes::MSC_Physics, 0, "Physics");
 
     if (!GetPhysicalWorld())
     {
@@ -1918,8 +1914,8 @@ IStatObj* CStatObj::UpdateVertices(strided_pointer<Vec3> pVtx, strided_pointer<V
                 mesh->UnlockStream(VSF_TANGENTS);
             }
             mesh->UnlockStream(VSF_GENERAL);
-            mesh->UnLockForThreadAccess();
         }
+        mesh->UnLockForThreadAccess();
     }
     return pObj;
 }
@@ -2675,7 +2671,7 @@ int CStatObj::PhysicalizeSubobjects(IPhysicalEntity* pent, const Matrix34* pMtx,
             }
             if (psj.maxForcePush + psj.maxForcePull + psj.maxForceShift + psj.maxTorqueBend + psj.maxTorqueTwist > 4.9E20f)
             {
-                if (sscanf(properties, "%f %f %f %f %f",
+                if (azsscanf(properties, "%f %f %f %f %f",
                         &psj.maxForcePush, &psj.maxForcePull, &psj.maxForceShift, &psj.maxTorqueBend, &psj.maxTorqueTwist) == 5)
                 {
                     psj.maxForcePush *= density;
@@ -2950,7 +2946,7 @@ void CStatObj::CopyFoliageData(IStatObj* pObjDst, bool bMove, IFoliage* pSrcFoli
         {
             delete[] pDst->m_pSpines[i].pVtx, delete[] pDst->m_pSpines[i].pVtxCur;
         }
-        free(pDst->m_pSpines);
+        CryModuleFree(pDst->m_pSpines);
         if (pDst->m_pBoneMapping)
         {
             delete[] pDst->m_pBoneMapping;
@@ -2967,7 +2963,7 @@ void CStatObj::CopyFoliageData(IStatObj* pObjDst, bool bMove, IFoliage* pSrcFoli
     }
     else
     {
-        memcpy(pDst->m_pSpines = (SSpine*)malloc(m_nSpines * sizeof(SSpine)), m_pSpines, m_nSpines * sizeof(SSpine));
+        memcpy(pDst->m_pSpines = (SSpine*)CryModuleMalloc(m_nSpines * sizeof(SSpine)), m_pSpines, m_nSpines * sizeof(SSpine));
         for (i1 = isubs = 0, ibone = 1; i1 < (int)m_chunkBoneIds.size() && m_chunkBoneIds[i1] != ibone; i1++)
         {
             isubs += !m_chunkBoneIds[i1];
@@ -3466,7 +3462,7 @@ void CStatObj::FreeFoliageData()
         {
             delete[] m_pSpines[i].pVtx, delete[] m_pSpines[i].pVtxCur, delete[] m_pSpines[i].pSegDim;
         }
-        free(m_pSpines);
+        CryModuleFree(m_pSpines);
         m_pSpines = 0;
         m_nSpines = 0;
     }
@@ -3524,7 +3520,7 @@ void CStatObj::AnalyzeFoliage(IRenderMesh* pRenderMesh, CContentCGF* pCGF)
         }
 
         const SFoliageInfoCGF& fi = *pCGF->GetFoliageInfo();
-        SSpine* const pSpines = (SSpine*)malloc(fi.nSpines * sizeof(SSpine));
+        SSpine* const pSpines = (SSpine*)CryModuleMalloc(fi.nSpines * sizeof(SSpine));
         for (int i = 0; i < fi.nSpines; ++i)
         {
             const SSpineRC& srcSpine = fi.pSpines[i];

@@ -36,6 +36,10 @@ namespace Audio
         return (iPlace != map.end());
     }
 
+#if defined(INCLUDE_AUDIO_PRODUCTION_CODE)
+    bool AudioDebugDrawFilter(const AZStd::string& objectName, const AZStd::string& filter);
+#endif //INCLUDE_AUDIO_PRODUCTION_CODE
+
     ///////////////////////////////////////////////////////////////////////////////////////////////////
     template <typename ObjType, typename IDType = size_t>
     class CInstanceManager
@@ -47,7 +51,7 @@ namespace Audio
 
         TPointerContainer m_cReserved;
         IDType m_nIDCounter;
-        const IDType m_nReserveSize;
+        const AZStd::size_t m_nReserveSize;
         const IDType m_nMinCounterValue;
 
         CInstanceManager(const size_t nReserveSize, const IDType nMinCounterValue)
@@ -55,7 +59,7 @@ namespace Audio
             , m_nReserveSize(nReserveSize)
             , m_nMinCounterValue(nMinCounterValue)
         {
-            m_cReserved.reserve(nReserveSize);
+            m_cReserved.reserve(m_nReserveSize);
         }
 
         IDType GetNextID()

@@ -8,7 +8,7 @@
 # Nicolas Mercier, 2009
 # Matt Clarkson, 2012
 
-import os, sys, re, tempfile
+import os, sys, re, tempfile, subprocess
 from waflib import Utils, Task, Logs, Options, Errors
 from waflib.Logs import debug, warn
 from waflib.Tools import c_preproc, ccroot, c, cxx, ar
@@ -274,7 +274,7 @@ def set_pdb_flags(self):
 
     if last_debug_option in ['/Zi', '/ZI']:
         # Compute PDB file path
-        pdb_folder = self.path.get_bld().make_node(str(self.idx))
+        pdb_folder = self.path.get_bld().make_node(str(self.target_uid))
         pdb_cxxflag = '/Fd{}'.format(pdb_folder.abspath())
 
 
@@ -324,8 +324,8 @@ def add_pch_msvc(self):
 
     # Generate PCH per target project idx
     # Avoids the case where two project have the same PCH output path but compile the PCH with different compiler options i.e. defines, includes, ...
-    self.pch_file = pch_source.change_ext('.%d.pch' % self.idx)
-    self.pch_object = pch_source.change_ext('.%d.obj' % self.idx)
+    self.pch_file = pch_source.change_ext('.%d.pch' % self.target_uid)
+    self.pch_object = pch_source.change_ext('.%d.obj' % self.target_uid)
     # Create PCH Task
     self.pch_task = pch_task = self.create_task('pch_msvc', pch_source, [self.pch_object, self.pch_file])
     pch_task.env.append_value('PCH_NAME', self.pch_header_name)
@@ -404,7 +404,7 @@ def strip_all_but_last_dependent_options(flags):
             delete.append(len(flags) -1 -idx)
         except:
             pass
-    for idx in reversed(delete):
+    for idx in delete:
         del flags[idx]
 
 
@@ -497,7 +497,7 @@ def setup_msvc(conf, versions, arch = False):
                         return compiler,revision,p1,p2,p3
                 except KeyError: continue
         except KeyError: continue
-    conf.fatal('msvc: Impossible to find a valid architecture for building (in setup_msvc)')
+    conf.fatal('msvc: Could not find a valid Visual Studio installation for building.')
 
     
 MSVC_INSTALLED_VERSIONS = {}
@@ -513,11 +513,12 @@ def get_msvc_versions(conf, windows_kit):
     if len(MSVC_INSTALLED_VERSIONS[windows_kit]) == 0:
         lst = []
         conf.gather_wsdk_versions(windows_kit, lst)
-        conf.gather_msvc_versions(windows_kit, lst)
+        conf.gather_msvc_2015_versions(windows_kit, lst)
+        conf.gather_msvc_2017_versions(windows_kit, lst)
         MSVC_INSTALLED_VERSIONS[windows_kit] = lst
     return MSVC_INSTALLED_VERSIONS[windows_kit]
 
-def gather_msvc_detected_versions():
+def gather_msvc_2015_detected_versions():
     #Detected MSVC versions!
     version_pattern = re.compile('^(\d\d?\.\d\d?)(Exp)?$')
     detected_versions = []
@@ -552,9 +553,9 @@ def gather_msvc_detected_versions():
     return detected_versions
     
 @conf
-def gather_msvc_versions(conf, windows_kit, versions):
+def gather_msvc_2015_versions(conf, windows_kit, versions):
     vc_paths = []
-    for (v,version,reg) in gather_msvc_detected_versions():
+    for (v,version,reg) in gather_msvc_2015_detected_versions():
         try:
             try:
                 msvc_version = Utils.winreg.OpenKey(Utils.winreg.HKEY_LOCAL_MACHINE, reg + "\\Setup\\VC")
@@ -567,17 +568,17 @@ def gather_msvc_versions(conf, windows_kit, versions):
     
     for version,vc_path in vc_paths:
         vs_path = os.path.dirname(vc_path)
-        conf.gather_msvc_targets(versions, version, windows_kit, vc_path)
+        conf.gather_msvc_2015_targets(versions, version, windows_kit, vc_path)
     pass
 
 @conf
-def gather_msvc_targets(conf, versions, version, windows_kit, vc_path):
+def gather_msvc_2015_targets(conf, versions, version, windows_kit, vc_path):
     #Looking for normal MSVC compilers!
     targets = []
     if os.path.isfile(os.path.join(vc_path, 'vcvarsall.bat')):
         for target,realtarget in all_msvc_platforms[::-1]:
             try:
-                targets.append((target, (realtarget, conf.get_msvc_version('msvc', version, target, windows_kit, os.path.join(vc_path, 'vcvarsall.bat')))))              
+                targets.append((target, (realtarget, conf.get_msvc_version('msvc', version, target, windows_kit, os.path.join(vc_path, 'vcvarsall.bat')))))
             except conf.errors.ConfigurationError:
                 pass
     elif os.path.isfile(os.path.join(vc_path, 'Common7', 'Tools', 'vsvars32.bat')):
@@ -592,6 +593,61 @@ def gather_msvc_targets(conf, versions, version, windows_kit, vc_path):
             pass
     if targets:
         versions.append(('msvc '+ version, targets))
+
+def find_vswhere():
+    vs_path = os.environ['ProgramFiles(x86)']
+    vswhere_exe = os.path.join(vs_path, 'Microsoft Visual Studio\\Installer\\vswhere.exe')
+    if not os.path.isfile(vswhere_exe):
+        vswhere_exe = ''
+    return vswhere_exe
+
+@conf
+def gather_msvc_2017_versions(conf, windows_kit, versions):
+    vc_paths = []
+
+    vswhere_exe = find_vswhere()
+    if not vswhere_exe == '':
+        version_string = ''
+        path_string = ''
+        try:
+            vs_where_args = conf.options.win_vs2017_vswhere_args.lower().split()
+            version_string = subprocess.check_output([vswhere_exe, '-property', 'installationVersion'] + vs_where_args)
+            if not version_string:
+                try:
+                    version_arg_index = vs_where_args.index('-version')
+                    Logs.warn('[WARN] VSWhere could not find an installed version of Visual Studio matching the version requirements provided (-version {}). Attempting to fall back on any available installed version.'.format(vs_where_args[version_arg_index + 1]))
+                    Logs.warn('[WARN] Lumberyard defaults the version range to the maximum version tested against before each release. You can modify the version range in the WAF user_settings\' option win_vs2017_vswhere_args under [Windows Options].')
+                    del vs_where_args[version_arg_index : version_arg_index + 2]
+                    version_string = subprocess.check_output([vswhere_exe, '-property', 'installationVersion'] + vs_where_args)
+                except ValueError:
+                    pass
+
+            version_parts = version_string.split('.')
+            version_string = version_parts[0]
+            path_string = subprocess.check_output([vswhere_exe, '-property', 'installationPath'] + vs_where_args)
+            path_string = path_string[:len(path_string)-2]
+            vc_paths.append((version_string, path_string))
+        except:
+            pass
+
+    for version, vc_path in vc_paths:
+        Logs.info('[INFO] Using Visual Studio version {} installed at: {}'.format(version_string, path_string))
+        conf.gather_msvc_2017_targets(versions, version, windows_kit, vc_path)
+    pass
+
+@conf
+def gather_msvc_2017_targets(conf, versions, version, windows_kit, vc_path):
+    #Looking for normal MSVC compilers!
+    targets = []
+    vcvarsall_bat = os.path.join(vc_path, 'VC', 'Auxiliary', 'Build', 'vcvarsall.bat')
+    if os.path.isfile(vcvarsall_bat):
+        try:
+            targets.append(('x64', ('x64', conf.get_msvc_version('msvc', version, 'x64', windows_kit, vcvarsall_bat))))
+        except conf.errors.ConfigurationError:
+            pass
+    if targets:
+        versions.append(('msvc '+ version, targets))
+
 
 def _get_prog_names(conf, compiler):
     if compiler=='intel':

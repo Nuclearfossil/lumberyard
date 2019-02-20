@@ -10,10 +10,8 @@
 *
 */
 #include "LmbrCentral_precompiled.h"
-#include "LmbrCentralEditor.h"
 #include "LmbrCentralReflectionTest.h"
 #include "Shape/EditorCapsuleShapeComponent.h"
-#include <AzToolsFramework/Application/ToolsApplication.h>
 
 namespace LmbrCentral
 {
@@ -34,25 +32,10 @@ namespace LmbrCentral
     </ObjectStream>)DELIMITER";
 
     class LoadEditorCapsuleShapeComponentFromVersion1
-        : public LoadReflectedObjectTest<AZ::ComponentApplication, LmbrCentralEditorModule, EditorCapsuleShapeComponent>
+        : public LoadEditorComponentTest<EditorCapsuleShapeComponent>
     {
     protected:
         const char* GetSourceDataBuffer() const override { return kEditorCapsuleComponentVersion1; }
-
-        void SetUp() override
-        {
-            LoadReflectedObjectTest::SetUp();
-
-            if (m_object)
-            {
-                m_editorCapsuleShapeComponent = m_object.get();
-                m_CapsuleShapeConfig = m_editorCapsuleShapeComponent->GetConfiguration();
-            }
-        }
-
-        EditorCapsuleShapeComponent* m_editorCapsuleShapeComponent = nullptr;
-        CapsuleShapeConfig m_CapsuleShapeConfig;
-
     };
 
     TEST_F(LoadEditorCapsuleShapeComponentFromVersion1, Application_IsRunning)
@@ -67,17 +50,26 @@ namespace LmbrCentral
 
     TEST_F(LoadEditorCapsuleShapeComponentFromVersion1, EditorComponent_Found)
     {
-        EXPECT_NE(m_editorCapsuleShapeComponent, nullptr);
+        EXPECT_EQ(m_entity->GetComponents().size(), 2);
+        EXPECT_NE(m_entity->FindComponent(m_object->GetId()), nullptr);
     }
 
     TEST_F(LoadEditorCapsuleShapeComponentFromVersion1, Height_MatchesSourceData)
     {
-        EXPECT_FLOAT_EQ(m_CapsuleShapeConfig.m_height, 0.57f);
+        float height = 0.0f;
+        CapsuleShapeComponentRequestsBus::EventResult(
+            height, m_entity->GetId(), &CapsuleShapeComponentRequests::GetHeight);
+
+        EXPECT_FLOAT_EQ(height, 0.57f);
     }
 
     TEST_F(LoadEditorCapsuleShapeComponentFromVersion1, Radius_MatchesSourceData)
     {
-        EXPECT_FLOAT_EQ(m_CapsuleShapeConfig.m_radius, 1.57f);
+        float radius = 0.0f;
+        CapsuleShapeComponentRequestsBus::EventResult(
+            radius, m_entity->GetId(), &CapsuleShapeComponentRequests::GetRadius);
+
+        EXPECT_FLOAT_EQ(radius, 1.57f);
     }
 }
 

@@ -24,7 +24,7 @@ def get_lymetrics_library_path():
     if platform.system() == "Windows":
         path = os.path.join(path, 'windows', 'intel64')
         for build in ['Release', 'Debug']:
-            for vs in ['vs2015', 'vs2013']:
+            for vs in ['vs2017', 'vs2015', 'vs2013']:
                 dll = os.path.join(path, vs, build, 'LyMetricsProducer_python.dll')
                 if os.path.exists(dll):
                     return dll
@@ -56,7 +56,7 @@ import lmbr_aws_test_support
 class UnitTest_CloudGemFramework_ResourceManager(lmbr_aws_test_support.lmbr_aws_TestCase):
 
     def setUp(self):        
-        self.prepare_test_envionment("test_unit_lmbr_aws")
+        self.prepare_test_environment("test_unit_lmbr_aws")
         
     def test_unit_lmbr_aws_end_to_end(self):
         self.run_all_tests()

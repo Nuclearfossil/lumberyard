@@ -180,7 +180,7 @@ struct SVertexModUI
     CSmartVariable<float>   fDividerZ;
     CSmartVariable<float>   fDividerW;
     CSmartVariable<Vec3>    vNoiseScale;
-    SVertexWaveFormUI wave[4];
+    SVertexWaveFormUI wave;
 };
 
 /** User Interface definition of material.
@@ -200,6 +200,7 @@ public:
     CSmartVariable<float> heatAmount;
     CSmartVariable<bool> bScatter;
     CSmartVariable<bool> bHideAfterBreaking;
+    CSmartVariable<bool> bFogVolumeShadingQualityHigh;
     CSmartVariable<bool> bBlendTerrainColor;
     //CSmartVariable<bool> bTranslucenseLayer;
     CSmartVariableEnum<QString> surfaceType;
@@ -365,27 +366,12 @@ public:
         enumVertexMod->AddItem("Sin Wave using vertex color", eDT_SinWaveUsingVtxColor);
         enumVertexMod->AddItem("Bulge", eDT_Bulge);
         enumVertexMod->AddItem("Squeeze", eDT_Squeeze);
-        //  enumVertexMod->AddItem("Perlin 2D",eDT_Perlin2D);
-        //  enumVertexMod->AddItem("Perlin 3D",eDT_Perlin3D);
-        //  enumVertexMod->AddItem("From Center",eDT_FromCenter);
-        //  enumVertexMod->AddItem("Bending", eDT_Bending);
-        //  enumVertexMod->AddItem("Proc. Flare",eDT_ProcFlare);
-        //  enumVertexMod->AddItem("Auto sprite",eDT_AutoSprite);
-        //  enumVertexMod->AddItem("Beam",eDT_Beam);
         enumVertexMod->AddItem("FixedOffset", eDT_FixedOffset);
 
         //////////////////////////////////////////////////////////////////////////
 
         enumWaveType = new CVarEnumList<int>();
-        enumWaveType->AddItem("None", eWF_None);
         enumWaveType->AddItem("Sin", eWF_Sin);
-        //  enumWaveType->AddItem("Half Sin",eWF_HalfSin);
-        //  enumWaveType->AddItem("Square",eWF_Square);
-        //  enumWaveType->AddItem("Triangle",eWF_Triangle);
-        //  enumWaveType->AddItem("Saw Tooth",eWF_SawTooth);
-        //  enumWaveType->AddItem("Inverse Saw Tooth",eWF_InvSawTooth);
-        //  enumWaveType->AddItem("Hill",eWF_Hill);
-        //  enumWaveType->AddItem("Inverse Hill",eWF_InvHill);
 
         //////////////////////////////////////////////////////////////////////////
         // Fill shaders enum.
@@ -507,9 +493,9 @@ public:
         AddVariable(tableAdvanced, bNoShadow, "No Shadow", "Disables casting shadows from mesh faces");
         AddVariable(tableAdvanced, bScatter, "Use Scattering", "Deprecated");
         AddVariable(tableAdvanced, bHideAfterBreaking, "Hide After Breaking", "Causes the object to disappear after procedurally breaking");
+        AddVariable(tableAdvanced, bFogVolumeShadingQualityHigh, "Fog Volume Shading Quality High", "high fog volume shading quality behaves more accurately with fog volumes.");
         AddVariable(tableAdvanced, bBlendTerrainColor, "Blend Terrain Color", "");
-
-        AddVariable(tableAdvanced, voxelCoverage, "Voxel Coverage", "Fine tunes occlsuion amount for svoti feature. Higher values occlude more closely to object shape.");
+        AddVariable(tableAdvanced, voxelCoverage, "Voxel Coverage", "Fine tunes occlusion amount for svogi feature. Higher values occlude more closely to object shape.");
         voxelCoverage->SetLimits(0, 1.0f);
 
         //////////////////////////////////////////////////////////////////////////
@@ -532,28 +518,15 @@ public:
         vertexMod.type->SetEnumList(enumVertexMod);
         AddVariable(tableVertexMod, vertexMod.type, "Type", "Choose method to define how the vertices will deform");
         AddVariable(tableVertexMod, vertexMod.fDividerX, "Wave Length", "Length of wave deformation");
-        //  AddVariable( tableVertexMod,vertexMod.fDividerX,"Wave Length X" );
-        //  AddVariable( tableVertexMod,vertexMod.fDividerY,"Wave Length Y" );
-        //  AddVariable( tableVertexMod,vertexMod.fDividerZ,"Wave Length Z" );
-        //  AddVariable( tableVertexMod,vertexMod.fDividerW,"Wave Length W" );
-        AddVariable(tableVertexMod, vertexMod.vNoiseScale, "Noise Scale", "");
 
-        AddVariable(tableVertexMod, vertexMod.wave[0].table, "Parameters", "Fine tunes how the vertices deform");
-        //  AddVariable( tableVertexMod,vertexMod.wave[0].table,"Wave X" );
-        //  AddVariable( tableVertexMod,vertexMod.wave[1].table,"Wave Y" );
-        //  AddVariable( tableVertexMod,vertexMod.wave[2].table,"Wave Z" );
-        //  AddVariable( tableVertexMod,vertexMod.wave[3].table,"Wave W" );
+        AddVariable(tableVertexMod, vertexMod.wave.table, "Parameters", "Fine tunes how the vertices deform");
 
-        for (int i = 0; i < 1; i++)
-        //  for (int i = 0; i < 4; i++)
-        {
-            vertexMod.wave[i].waveFormType->SetEnumList(enumWaveType);
-            AddVariable(vertexMod.wave[i].table, vertexMod.wave[i].waveFormType, "Type", "Sin type will include vertex color in calculation");
-            AddVariable(vertexMod.wave[i].table, vertexMod.wave[i].level, "Level", "Scales the object equally in xyz");
-            AddVariable(vertexMod.wave[i].table, vertexMod.wave[i].amplitude, "Amplitude", "Strength of vertex deformation (vertex color: b, normal: z)");
-            AddVariable(vertexMod.wave[i].table, vertexMod.wave[i].phase, "Phase", "Offset of vertex deformation (vertex color: r, normal: x)");
-            AddVariable(vertexMod.wave[i].table, vertexMod.wave[i].frequency, "Frequency", "Speed of vertex animation (vertex color: g, normal: y)");
-        }
+        vertexMod.wave.waveFormType->SetEnumList(enumWaveType);
+        AddVariable(vertexMod.wave.table, vertexMod.wave.waveFormType, "Type", "Sin type will include vertex color in calculation");
+        AddVariable(vertexMod.wave.table, vertexMod.wave.level, "Level", "Scales the object equally in xyz");
+        AddVariable(vertexMod.wave.table, vertexMod.wave.amplitude, "Amplitude", "Strength of vertex deformation (vertex color: b, normal: z)");
+        AddVariable(vertexMod.wave.table, vertexMod.wave.phase, "Phase", "Offset of vertex deformation (vertex color: r, normal: x)");
+        AddVariable(vertexMod.wave.table, vertexMod.wave.frequency, "Frequency", "Speed of vertex animation (vertex color: g, normal: y)");
 
         return m_vars;
     }
@@ -896,13 +869,37 @@ void CMaterialUI::GetTextureResources(SInputShaderResources& sr, int tex, int pr
         return;
     }
 
-    // The following line will insert the slot if did not exist.
-    SEfResTexture*      pTextureRes = &(sr.m_TexturesResourcesMap[tex]);
     QString             texFilename;
-
     textureVars[tex]->Get(texFilename);
+    if (texFilename.isEmpty())
+    {
+        // Remove the texture if the path was cleared in the UI
+        sr.m_TexturesResourcesMap.erase(tex);
+
+        // If the normal map/second normal map has been cleared in the UI, 
+        // we must also clear the smoothness/second smoothness since smoothness lives in the alpha of the normal
+        if (tex == EFTT_NORMALS)
+        {
+            sr.m_TexturesResourcesMap.erase(EFTT_SMOOTHNESS);
+        }
+
+        // EFTT_CUSTOM_SECONDARY is the 2nd normal
+        if (tex == EFTT_CUSTOM_SECONDARY)
+        {
+            sr.m_TexturesResourcesMap.erase(EFTT_SECOND_SMOOTHNESS);
+        }
+        return;
+    }
     texFilename = Path::ToUnixPath(texFilename);
 
+    if (texFilename.size() > AZ_MAX_PATH_LEN)
+    {
+        AZ_Error("Material Editor", false, "Texture path exceeds the maximium allowable length of %d.", AZ_MAX_PATH_LEN);
+        return;
+    }
+
+    // The following line will insert the slot if did not exist.
+    SEfResTexture*      pTextureRes = &(sr.m_TexturesResourcesMap[tex]);
     pTextureRes->m_Name = texFilename.toUtf8().data();
 
     //pTextureRes->m_Amount = textures[tex].amount;
@@ -945,34 +942,13 @@ void CMaterialUI::SetVertexDeform(const SInputShaderResources& sr)
 {
     vertexMod.type = (int)sr.m_DeformInfo.m_eType;
     vertexMod.fDividerX = sr.m_DeformInfo.m_fDividerX;
-    vertexMod.fDividerY = sr.m_DeformInfo.m_fDividerY;
-    vertexMod.fDividerZ = sr.m_DeformInfo.m_fDividerZ;
-    vertexMod.fDividerW = sr.m_DeformInfo.m_fDividerW;
     vertexMod.vNoiseScale = sr.m_DeformInfo.m_vNoiseScale;
 
-    vertexMod.wave[0].waveFormType = sr.m_DeformInfo.m_WaveX.m_eWFType;
-    vertexMod.wave[0].amplitude = sr.m_DeformInfo.m_WaveX.m_Amp;
-    vertexMod.wave[0].level = sr.m_DeformInfo.m_WaveX.m_Level;
-    vertexMod.wave[0].phase = sr.m_DeformInfo.m_WaveX.m_Phase;
-    vertexMod.wave[0].frequency = sr.m_DeformInfo.m_WaveX.m_Freq;
-
-    vertexMod.wave[1].waveFormType = sr.m_DeformInfo.m_WaveY.m_eWFType;
-    vertexMod.wave[1].amplitude = sr.m_DeformInfo.m_WaveY.m_Amp;
-    vertexMod.wave[1].level = sr.m_DeformInfo.m_WaveY.m_Level;
-    vertexMod.wave[1].phase = sr.m_DeformInfo.m_WaveY.m_Phase;
-    vertexMod.wave[1].frequency = sr.m_DeformInfo.m_WaveY.m_Freq;
-
-    vertexMod.wave[2].waveFormType = sr.m_DeformInfo.m_WaveZ.m_eWFType;
-    vertexMod.wave[2].amplitude = sr.m_DeformInfo.m_WaveZ.m_Amp;
-    vertexMod.wave[2].level = sr.m_DeformInfo.m_WaveZ.m_Level;
-    vertexMod.wave[2].phase = sr.m_DeformInfo.m_WaveZ.m_Phase;
-    vertexMod.wave[2].frequency = sr.m_DeformInfo.m_WaveZ.m_Freq;
-
-    vertexMod.wave[3].waveFormType = sr.m_DeformInfo.m_WaveW.m_eWFType;
-    vertexMod.wave[3].amplitude = sr.m_DeformInfo.m_WaveW.m_Amp;
-    vertexMod.wave[3].level = sr.m_DeformInfo.m_WaveW.m_Level;
-    vertexMod.wave[3].phase = sr.m_DeformInfo.m_WaveW.m_Phase;
-    vertexMod.wave[3].frequency = sr.m_DeformInfo.m_WaveW.m_Freq;
+    vertexMod.wave.waveFormType = EWaveForm::eWF_Sin;
+    vertexMod.wave.amplitude = sr.m_DeformInfo.m_WaveX.m_Amp;
+    vertexMod.wave.level = sr.m_DeformInfo.m_WaveX.m_Level;
+    vertexMod.wave.phase = sr.m_DeformInfo.m_WaveX.m_Phase;
+    vertexMod.wave.frequency = sr.m_DeformInfo.m_WaveX.m_Freq;
 }
 
 //////////////////////////////////////////////////////////////////////////
@@ -985,34 +961,13 @@ void CMaterialUI::GetVertexDeform(SInputShaderResources& sr, int propagationFlag
 
     sr.m_DeformInfo.m_eType = (EDeformType)((int)vertexMod.type);
     sr.m_DeformInfo.m_fDividerX = vertexMod.fDividerX;
-    sr.m_DeformInfo.m_fDividerY = vertexMod.fDividerY;
-    sr.m_DeformInfo.m_fDividerZ = vertexMod.fDividerZ;
-    sr.m_DeformInfo.m_fDividerW = vertexMod.fDividerW;
     sr.m_DeformInfo.m_vNoiseScale = vertexMod.vNoiseScale;
 
-    sr.m_DeformInfo.m_WaveX.m_eWFType = (EWaveForm)((int)vertexMod.wave[0].waveFormType);
-    sr.m_DeformInfo.m_WaveX.m_Amp = vertexMod.wave[0].amplitude;
-    sr.m_DeformInfo.m_WaveX.m_Level = vertexMod.wave[0].level;
-    sr.m_DeformInfo.m_WaveX.m_Phase = vertexMod.wave[0].phase;
-    sr.m_DeformInfo.m_WaveX.m_Freq = vertexMod.wave[0].frequency;
-
-    sr.m_DeformInfo.m_WaveY.m_eWFType = (EWaveForm)((int)vertexMod.wave[1].waveFormType);
-    sr.m_DeformInfo.m_WaveY.m_Amp = vertexMod.wave[1].amplitude;
-    sr.m_DeformInfo.m_WaveY.m_Level = vertexMod.wave[1].level;
-    sr.m_DeformInfo.m_WaveY.m_Phase = vertexMod.wave[1].phase;
-    sr.m_DeformInfo.m_WaveY.m_Freq = vertexMod.wave[1].frequency;
-
-    sr.m_DeformInfo.m_WaveZ.m_eWFType = (EWaveForm)((int)vertexMod.wave[2].waveFormType);
-    sr.m_DeformInfo.m_WaveZ.m_Amp = vertexMod.wave[2].amplitude;
-    sr.m_DeformInfo.m_WaveZ.m_Level = vertexMod.wave[2].level;
-    sr.m_DeformInfo.m_WaveZ.m_Phase = vertexMod.wave[2].phase;
-    sr.m_DeformInfo.m_WaveZ.m_Freq = vertexMod.wave[2].frequency;
-
-    sr.m_DeformInfo.m_WaveW.m_eWFType = (EWaveForm)((int)vertexMod.wave[3].waveFormType);
-    sr.m_DeformInfo.m_WaveW.m_Amp = vertexMod.wave[3].amplitude;
-    sr.m_DeformInfo.m_WaveW.m_Level = vertexMod.wave[3].level;
-    sr.m_DeformInfo.m_WaveW.m_Phase = vertexMod.wave[3].phase;
-    sr.m_DeformInfo.m_WaveW.m_Freq = vertexMod.wave[3].frequency;
+    sr.m_DeformInfo.m_WaveX.m_eWFType = (EWaveForm)((int)vertexMod.wave.waveFormType);
+    sr.m_DeformInfo.m_WaveX.m_Amp = vertexMod.wave.amplitude;
+    sr.m_DeformInfo.m_WaveX.m_Level = vertexMod.wave.level;
+    sr.m_DeformInfo.m_WaveX.m_Phase = vertexMod.wave.phase;
+    sr.m_DeformInfo.m_WaveX.m_Freq = vertexMod.wave.frequency;
 }
 
 void CMaterialUI::PropagateToLinkedMaterial(CMaterial* mtl, CVarBlockPtr pShaderParams)
@@ -1145,6 +1100,7 @@ void CMaterialUI::SetFromMaterial(CMaterial* mtlIn)
     b2Sided = (mtlFlags & MTL_FLAG_2SIDED);
     bScatter = (mtlFlags & MTL_FLAG_SCATTER);
     bHideAfterBreaking = (mtlFlags & MTL_FLAG_HIDEONBREAK);
+    bFogVolumeShadingQualityHigh = (mtlFlags & MTL_FLAG_FOG_VOLUME_SHADING_QUALITY_HIGH);
     bBlendTerrainColor = (mtlFlags & MTL_FLAG_BLEND_TERRAIN);
     texUsageMask = mtlIn->GetTexmapUsageMask();
 
@@ -1238,6 +1194,15 @@ void CMaterialUI::SetToMaterial(CMaterial* mtl, int propagationFlags)
         else
         {
             mtlFlags &= ~MTL_FLAG_HIDEONBREAK;
+        }
+
+        if (bFogVolumeShadingQualityHigh)
+        {
+            mtlFlags |= MTL_FLAG_FOG_VOLUME_SHADING_QUALITY_HIGH;
+        }
+        else
+        {
+            mtlFlags &= ~MTL_FLAG_FOG_VOLUME_SHADING_QUALITY_HIGH;
         }
 
         if (bBlendTerrainColor)
@@ -1498,6 +1463,16 @@ BOOL CMaterialDialog::OnInitDialog()
         m_wndMtlBrowser->StartRecordUpdateJobs();
     }
 
+    // Set the image list control to give stretch priority to the other widgets. This is both to avoid resizing the 
+    // image list control when the window is resized and to avoid an issue with the QSplitter resizing the image list
+    // control when enabling/disabling the other two widgets.
+    const int materialImageControlIndex = 0;
+    const int materialImagePropertiesControlIndex = 1;
+    const int materialPlaceholderLabelIndex = 2;
+    rightWidget->setStretchFactor(materialImageControlIndex, 0);
+    rightWidget->setStretchFactor(materialImagePropertiesControlIndex, 1);
+    rightWidget->setStretchFactor(materialPlaceholderLabelIndex, 1);
+
     resize(1200, 800);
 
     return TRUE; // return TRUE unless you set the focus to a control
@@ -1540,13 +1515,13 @@ void CMaterialDialog::InitToolbar(UINT nToolbarResID)
     m_pickAction = m_toolbar->addAction(pickIcon, tr("Pick Material from Object"), this, SLOT(OnPickMtl()));
     m_pickAction->setCheckable(true);
     QAction* sepAction = m_toolbar->addSeparator();
-    QComboBox* cb = new QComboBox(this);
-    cb->addItem(tr("All Materials"));
-    cb->addItem(tr("Used In Level"));
-    cb->setMinimumWidth(150);
-    QAction* cbAction = m_toolbar->addWidget(cb);
-    cb->setCurrentIndex(0);
-    connect(cb, SIGNAL(currentIndexChanged(int)), this, SLOT(OnChangedBrowserListType(int)));
+    m_filterTypeSelection = new QComboBox(this);
+    m_filterTypeSelection->addItem(tr("All Materials"));
+    m_filterTypeSelection->addItem(tr("Used In Level"));
+    m_filterTypeSelection->setMinimumWidth(150);
+    QAction* cbAction = m_toolbar->addWidget(m_filterTypeSelection);
+    m_filterTypeSelection->setCurrentIndex(0);
+    connect(m_filterTypeSelection, SIGNAL(currentIndexChanged(int)), this, SLOT(OnChangedBrowserListType(int)));
     m_toolbar->addSeparator();
     QIcon addIcon;
     addIcon.addPixmap(QPixmap{ ":/MaterialDialog/ToolBar/images/materialdialog_add_normal.png" }, QIcon::Normal);
@@ -1582,15 +1557,15 @@ void CMaterialDialog::InitToolbar(UINT nToolbarResID)
     m_previewAction = m_toolbar->addAction(previewIcon, tr("Open Large Material Preview Window"), this, SLOT(OnMaterialPreview()));
     m_toolbar->addSeparator();
     QIcon resetViewportIcon;
-    resetViewportIcon.addPixmap(QPixmap{ ":/MaterialDialog/ToolBar/materialdialog_reset_viewport_normal.png" }, QIcon::Normal);
-    resetViewportIcon.addPixmap(QPixmap{ ":/MaterialDialog/ToolBar/materialdialog_reset_viewport_active.png" }, QIcon::Active);
-    resetViewportIcon.addPixmap(QPixmap{ ":/MaterialDialog/ToolBar/materialdialog_reset_viewport_disabled.png" }, QIcon::Disabled);
+    resetViewportIcon.addPixmap(QPixmap{ ":/MaterialDialog/ToolBar/images/materialdialog_reset_viewport_normal.png" }, QIcon::Normal);
+    resetViewportIcon.addPixmap(QPixmap{ ":/MaterialDialog/ToolBar/images/materialdialog_reset_viewport_active.png" }, QIcon::Active);
+    resetViewportIcon.addPixmap(QPixmap{ ":/MaterialDialog/ToolBar/images/materialdialog_reset_viewport_disabled.png" }, QIcon::Disabled);
     m_resetViewporAction = m_toolbar->addAction(resetViewportIcon, tr("Reset Material Viewport"), this, SLOT(OnResetMaterialViewport()));
 
     UpdateActions();
     setContextMenuPolicy(Qt::ContextMenuPolicy::NoContextMenu);
 
-    connect(m_toolbar, &QToolBar::orientationChanged, [=](Qt::Orientation orientation)
+    connect(m_toolbar, &QToolBar::orientationChanged, m_toolbar, [=](Qt::Orientation orientation)
         {
             if (orientation == Qt::Vertical)
             {
@@ -1748,40 +1723,45 @@ void CMaterialDialog::UpdateShaderParamsUI(CMaterial* pMtl)
                     }
                 }
             }
-
-            m_excludedPublicVars.pMaterial = pMtl;
-
-            // collect excluded vars from old block (m_publicVars)
-            // which exist in m_publicVars but not in a new generated pPublicVars block
-            for (int i = m_publicVars->GetNumVariables() - 1; i >= 0; --i)
+            // We only want to collect vars if the old and new block are part of the same
+            // material, otherwise we are storing state from one material to an other.
+            if (m_excludedPublicVars.pMaterial == pMtl)
             {
-                IVariable* pOldVar = m_publicVars->GetVariable(i);
-                bool isVarExist = false;
-                for (int j = pPublicVars->GetNumVariables() - 1; j >= 0; --j)
+                // collect excluded vars from old block (m_publicVars)
+                // which exist in m_publicVars but not in a new generated pPublicVars block
+                for (int i = m_publicVars->GetNumVariables() - 1; i >= 0; --i)
                 {
-                    IVariable* pVar = pPublicVars->GetVariable(j);
-                    if (!QString::compare(pOldVar->GetName(), pVar->GetName()))
+                    IVariable* pOldVar = m_publicVars->GetVariable(i);
+                    bool isVarExist = false;
+                    for (int j = pPublicVars->GetNumVariables() - 1; j >= 0; --j)
                     {
-                        isVarExist = true;
-                        break;
+                        IVariable* pVar = pPublicVars->GetVariable(j);
+                        if (!QString::compare(pOldVar->GetName(), pVar->GetName()))
+                        {
+                            isVarExist = true;
+                            break;
+                        }
+                    }
+                    if (!isVarExist)
+                    {
+                        m_excludedPublicVars.vars.AddVariable(pOldVar->Clone(false));
                     }
                 }
-                if (!isVarExist)
-                {
-                    m_excludedPublicVars.vars.AddVariable(pOldVar->Clone(false));
-                }
             }
+            m_excludedPublicVars.pMaterial = pMtl;
         }
 
         m_publicVars = pPublicVars;
         if (m_publicVars)
         {
             m_publicVars->Sort();
-            m_propsCtrl->ReplaceVarBlock(publicVars, m_publicVars);
-            if (bNeedUpdateMaterialFromUI)
-            {
-                pMtl->SetPublicVars(m_publicVars, pMtl);
-            }
+        }
+
+        m_propsCtrl->ReplaceVarBlock(publicVars, m_publicVars);
+
+        if (m_publicVars && bNeedUpdateMaterialFromUI)
+        {
+            pMtl->SetPublicVars(m_publicVars, pMtl);
         }
     }
     IVariable* textureSlotsVar = m_pMaterialUI->tableTexture.GetVar();
@@ -1886,6 +1866,8 @@ void CMaterialDialog::SelectItem(CBaseLibraryItem* item, bool bForceReload)
     m_propsCtrl->EnableUpdateCallback(false);
     m_pMaterialUI->SetFromMaterial(mtl);
     m_propsCtrl->EnableUpdateCallback(true);
+
+    mtl->SetShaderParamPublicScript();
 
     //////////////////////////////////////////////////////////////////////////
 
@@ -2210,6 +2192,7 @@ void CMaterialDialog::UpdatePreview()
 //////////////////////////////////////////////////////////////////////////
 void CMaterialDialog::OnChangedBrowserListType(int sel)
 {
+    m_wndMtlBrowser->ShowOnlyLevelMaterials(sel == 1);
     m_pMatManager->SetCurrentMaterial(0);
     UpdateActions();
 }
@@ -2260,9 +2243,16 @@ void CMaterialDialog::OnDataBaseItemEvent(IDataBaseItem* pItem, EDataBaseItemEve
 // If an object is selected or de-selected, update the available actions in the Material Editor toolbar
 void CMaterialDialog::OnEditorNotifyEvent(EEditorNotifyEvent event)
 {
-    if (event == eNotify_OnSelectionChange)
+    switch (event)
     {
+    case eNotify_OnSelectionChange:
         UpdateActions();
+        break;
+    case eNotify_OnCloseScene:
+    case eNotify_OnEndNewScene:
+    case eNotify_OnEndSceneOpen:
+        m_filterTypeSelection->setCurrentIndex(0);
+        break;
     }
 }
 

@@ -11,7 +11,7 @@
 */
 #include "native/AssetManager/assetScannerWorker.h"
 #include "native/AssetManager/assetScanner.h"
-#include "native/utilities/AssetUtils.h"
+#include "native/utilities/assetUtils.h"
 #include "native/utilities/PlatformConfiguration.h"
 #include <QDir>
 #include <QFileInfo>
@@ -31,7 +31,10 @@ void AssetScannerWorker::StartScan()
     Q_ASSERT(QThread::currentThread() == this->thread());
 
     m_fileList.clear();
+    m_folderList.clear();
     m_doScan = true;
+
+    AZ_TracePrintf(AssetProcessor::ConsoleChannel, "Scanning file system for changes...\n");
 
     Q_EMIT ScanningStateChanged(AssetProcessor::AssetScanningStatus::Started);
     Q_EMIT ScanningStateChanged(AssetProcessor::AssetScanningStatus::InProgress);
@@ -48,6 +51,7 @@ void AssetScannerWorker::StartScan()
     if (!m_doScan)
     {
         m_fileList.clear();
+        m_folderList.clear();
         Q_EMIT ScanningStateChanged(AssetProcessor::AssetScanningStatus::Stopped);
         return;
     }
@@ -55,6 +59,8 @@ void AssetScannerWorker::StartScan()
     {
         EmitFiles();
     }
+
+    AZ_TracePrintf(AssetProcessor::ConsoleChannel, "File system scan done.\n");
 
     Q_EMIT ScanningStateChanged(AssetProcessor::AssetScanningStatus::Completed);
 }
@@ -97,15 +103,16 @@ void AssetScannerWorker::ScanForSourceFiles(ScanFolderInfo scanFolderInfo)
 
         QString absPath = entry.absoluteFilePath();
 
-        // Filtering out excluded files
-        if (m_platformConfiguration->IsFileExcluded(absPath))
-        {
-            continue;
-        }
-
         if (entry.isDir())
         {
+            // Filtering out excluded files
+            if (m_platformConfiguration->IsFileExcluded(absPath))
+            {
+                continue;
+            }
+
             //Entry is a directory
+            m_folderList.insert(absPath);
             ScanFolderInfo tempScanFolderInfo(absPath, "", "", "", false, true);
             ScanForSourceFiles(tempScanFolderInfo);
         }
@@ -139,15 +146,25 @@ void AssetScannerWorker::ScanForSourceFiles(ScanFolderInfo scanFolderInfo)
 void AssetScannerWorker::EmitFiles()
 {
     //Loop over all source asset files and send them up the chain:
-    for (const QString& fileEntries : m_fileList)
+    for (const QString& fileEntry : m_fileList)
     {
         if (!m_doScan)
         {
             break;
         }
-        Q_EMIT FileOfInterestFound(fileEntries);
+        Q_EMIT FileOfInterestFound(fileEntry);
     }
     m_fileList.clear();
+    //Loop over all folders and send them up the chain:
+    for (const QString& folderEntry : m_folderList)
+    {
+        if (!m_doScan)
+        {
+            break;
+        }
+        Q_EMIT FolderOfInterestFound(folderEntry);
+    }
+    m_folderList.clear();
 }
 
 

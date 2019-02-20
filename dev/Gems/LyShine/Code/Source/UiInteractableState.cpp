@@ -140,8 +140,7 @@ void UiInteractableStateColor::Reflect(AZ::ReflectContext* context)
                 ->Attribute(AZ::Edit::Attributes::AutoExpand, true);
 
             editInfo->DataElement("ComboBox", &UiInteractableStateColor::m_targetEntity, "Target", "The target element.")
-                ->Attribute("EnumValues", &UiInteractableStateColor::PopulateTargetEntityList)
-                ->Attribute(AZ::Edit::Attributes::SliceFlags, AZ::Edit::UISliceFlags::PushableEvenIfInvisible);
+                ->Attribute("EnumValues", &UiInteractableStateColor::PopulateTargetEntityList);
             editInfo->DataElement("Color", &UiInteractableStateColor::m_color, "Color", "The color tint.");
         }
     }
@@ -236,8 +235,7 @@ void UiInteractableStateAlpha::Reflect(AZ::ReflectContext* context)
                 ->Attribute(AZ::Edit::Attributes::AutoExpand, true);
 
             editInfo->DataElement("ComboBox", &UiInteractableStateAlpha::m_targetEntity, "Target", "The target element.")
-                ->Attribute("EnumValues", &UiInteractableStateAlpha::PopulateTargetEntityList)
-                ->Attribute(AZ::Edit::Attributes::SliceFlags, AZ::Edit::UISliceFlags::PushableEvenIfInvisible);
+                ->Attribute("EnumValues", &UiInteractableStateAlpha::PopulateTargetEntityList);
             editInfo->DataElement("Slider", &UiInteractableStateAlpha::m_alpha, "Alpha", "The opacity.");
         }
     }
@@ -395,7 +393,6 @@ void UiInteractableStateSprite::Reflect(AZ::ReflectContext* context)
 
             editInfo->DataElement("ComboBox", &UiInteractableStateSprite::m_targetEntity, "Target", "The target element.")
                 ->Attribute("EnumValues", &UiInteractableStateSprite::PopulateTargetEntityList)
-                ->Attribute(AZ::Edit::Attributes::SliceFlags, AZ::Edit::UISliceFlags::PushableEvenIfInvisible)
                 ->Attribute(AZ::Edit::Attributes::ChangeNotify, &UiInteractableStateSprite::OnTargetElementChange)
                 ->Attribute(AZ::Edit::Attributes::ChangeNotify, AZ_CRC("RefreshEntireTree", 0xefbc823c));
             editInfo->DataElement("Sprite", &UiInteractableStateSprite::m_spritePathname, "Sprite", "The sprite.")
@@ -466,7 +463,7 @@ UiInteractableStateFont::UiInteractableStateFont()
     : m_fontFamily(nullptr)
     , m_fontEffectIndex(0)
 {
-    SetFontPathname("default-ui");
+    InitCommon("default-ui");
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -475,12 +472,21 @@ UiInteractableStateFont::UiInteractableStateFont(AZ::EntityId target, const AZSt
     , m_fontFamily(nullptr)
     , m_fontEffectIndex(fontEffectIndex)
 {
-    SetFontPathname(pathname);
+    InitCommon(pathname);
+}
+
+////////////////////////////////////////////////////////////////////////////////////////////////////
+void UiInteractableStateFont::InitCommon(const AZStd::string& fontPathname)
+{
+    SetFontPathname(fontPathname);
+
+    FontNotificationBus::Handler::BusConnect();
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 UiInteractableStateFont::~UiInteractableStateFont()
 {
+    FontNotificationBus::Handler::BusDisconnect();
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -512,6 +518,29 @@ void UiInteractableStateFont::SetInteractableEntity(AZ::EntityId interactableEnt
     if (!m_targetEntity.IsValid())
     {
         m_targetEntity = m_interactableEntity;
+    }
+}
+
+////////////////////////////////////////////////////////////////////////////////////////////////////
+void UiInteractableStateFont::OnFontsReloaded()
+{
+    // All old font pointers have been deleted and the old font family pointers have been removed from the CryFont list.
+    // New fonts and font family objects have been created and added to the CryFont list.
+    // However, the old font family objects are still around because we have a shared pointer to them.
+    // Clear the font family shared pointers since they should no longer be used (their fonts have been deleted).
+    // When the last one is cleared, the font family's custom deleter will be called and the object will be deleted.
+    // This is OK because the custom deleter doesn't do anything if the font family is not in the CryFont's list (which it isn't)
+    m_fontFamily = nullptr;
+
+    SetFontPathname(m_fontFilename.GetAssetPath());
+
+    // It's possible that the font failed to load. If it did, try to load and use the default font but leave the
+    // assigned font path the same
+    if (!m_fontFamily)
+    {
+        AZStd::string assignedFontFilepath = m_fontFilename.GetAssetPath();
+        SetFontPathname("");
+        m_fontFilename.SetAssetPath(assignedFontFilepath.c_str());
     }
 }
 
@@ -558,6 +587,7 @@ void UiInteractableStateFont::SetFontPathname(const AZStd::string& pathname)
             if (m_fontEffectIndex >= numEffects)
             {
                 m_fontEffectIndex = 0;
+                AZ_Warning("UiInteractableState", false, "Font effect index is out of range for changed font, resetting index to 0");
             }
         }
     }
@@ -618,8 +648,7 @@ void UiInteractableStateFont::Reflect(AZ::ReflectContext* context)
                 ->Attribute(AZ::Edit::Attributes::AutoExpand, true);
 
             editInfo->DataElement("ComboBox", &UiInteractableStateFont::m_targetEntity, "Target", "The target element.")
-                ->Attribute("EnumValues", &UiInteractableStateFont::PopulateTargetEntityList)
-                ->Attribute(AZ::Edit::Attributes::SliceFlags, AZ::Edit::UISliceFlags::PushableEvenIfInvisible);
+                ->Attribute("EnumValues", &UiInteractableStateFont::PopulateTargetEntityList);
             editInfo->DataElement("SimpleAssetRef", &UiInteractableStateFont::m_fontFilename, "Font path", "The font asset pathname.")
                 ->Attribute("ChangeNotify", &UiInteractableStateFont::OnFontPathnameChange)
                 ->Attribute("ChangeNotify", AZ_CRC("RefreshEntireTree", 0xefbc823c));

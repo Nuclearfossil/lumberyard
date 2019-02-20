@@ -37,6 +37,7 @@
 #include <AzFramework/Input/Devices/Keyboard/InputDeviceKeyboard.h>
 #include <AzFramework/Input/Devices/Mouse/InputDeviceMouse.h>
 #include <AzCore/std/string/conversions.h>
+#include <AzCore/std/algorithm.h>
 
 //#define DEFENCE_CVAR_HASH_LOGGING
 
@@ -314,12 +315,18 @@ int CXConsole::con_showonload = 0;
 int CXConsole::con_debug = 0;
 int CXConsole::con_restricted = 0;
 
+namespace
+{
+    const AzFramework::InputChannelId s_nullRepeatEventId("xconsole_null_repeat_event_id");
+}
+
 //////////////////////////////////////////////////////////////////////
 // Construction/Destruction
 //////////////////////////////////////////////////////////////////////
 CXConsole::CXConsole()
     : AzFramework::InputChannelEventListener(AzFramework::InputChannelEventListener::GetPriorityDebug())
     , AzFramework::InputTextEventListener(AzFramework::InputTextEventListener::GetPriorityDebug())
+    , m_nRepeatEventId(s_nullRepeatEventId)
 {
     m_fRepeatTimer = 0;
     m_pSysDeactivateConsole = 0;
@@ -715,8 +722,6 @@ bool CXConsole::CVarNameLess(const std::pair<const char*, ICVar*>& lhs, const st
 //////////////////////////////////////////////////////////////////////////
 void CXConsole::LoadConfigVar(const char* sVariable, const char* sValue)
 {
-    ScopedSwitchToGlobalHeap useGlobalHeap;
-
     ICVar* pCVar = GetCVar(sVariable);
     if (pCVar)
     {
@@ -820,31 +825,18 @@ ICVar* CXConsole::RegisterCVarGroup(const char* szName, const char* szFileName)
     }
 
     ICVar* pCVar = stl::find_in_map(m_mapVariables, szName, NULL);
-    AZStd::unordered_map<AZStd::string, CVarInfo>* map = gEnv->pSystem->GetGraphicsSettingsMap();
-    if (pCVar && !map)
+    if (pCVar)
     {
-        assert(0);          // groups should be only registered once
+        AZ_Error("System", false, "CVar groups should only be registered once");
         return pCVar;
     }
 
     CXConsoleVariableCVarGroup* pCVarGroup = new CXConsoleVariableCVarGroup(this, szName, szFileName, VF_COPYNAME);
 
-    // Register cvar if not opening graphics settings dialog box
-    if (!map)
-    {
-        pCVar = pCVarGroup;
+    pCVar = pCVarGroup;
 
-        RegisterVar(pCVar, CXConsoleVariableCVarGroup::OnCVarChangeFunc);
-    }
-    /*
-        // log to file - useful during development - might not be required for final shipping
-        {
-            string sInfo = pCVarGroup->GetDetailedInfo();
+    RegisterVar(pCVar, CXConsoleVariableCVarGroup::OnCVarChangeFunc);
 
-            gEnv->pLog->LogToFile("CVarGroup %s",sInfo.c_str());
-            gEnv->pLog->LogToFile(" ");
-        }
-    */
     return pCVar;
 }
 
@@ -1154,7 +1146,7 @@ ICVar* CXConsole::GetCVar(const char* sName)
             // Much slower but allows names with wrong case (use only where performance doesn't matter).
             for(it=m_mapVariables.begin(); it!=m_mapVariables.end(); ++it)
             {
-                if(_stricmp(it->first,sName)==0)
+                if(azstricmp(it->first,sName)==0)
                     return it->second;
             }
         }
@@ -1162,7 +1154,7 @@ ICVar* CXConsole::GetCVar(const char* sName)
         {
             for(it=m_mapVariables.begin(); it!=m_mapVariables.end(); ++it)
             {
-                if(_stricmp(it->first,sName)==0)
+                if(azstricmp(it->first,sName)==0)
                 {
                     CryFatalError("Error: Wrong case for '%s','%s'",it->first,sName);
                 }
@@ -1223,11 +1215,11 @@ void CXConsole::Update()
 
     if (!m_bConsoleActive)
     {
-        m_nRepeatEventId = AzFramework::InputChannelId();
+        m_nRepeatEventId = s_nullRepeatEventId;
     }
 
     // Process Key press repeat (backspace and cursor on PC)
-    if (m_nRepeatEventId != AzFramework::InputChannelId())
+    if (m_nRepeatEventId != s_nullRepeatEventId)
     {
         const float fRepeatDelay = 1.0f / 40.0f;          // in sec (similar to Windows default but might differ from actual setting)
         const float fHitchDelay = 1.0f / 10.0f;               // in sec. Very low, but still reasonable frame-rate (debug builds)
@@ -1240,7 +1232,7 @@ void CXConsole::Update()
             if (m_fRepeatTimer < -fHitchDelay)
             {
                 // bad framerate or hitch
-                m_nRepeatEventId = AzFramework::InputChannelId();
+                m_nRepeatEventId = s_nullRepeatEventId;
             }
             else
             {
@@ -1274,7 +1266,7 @@ bool CXConsole::OnInputChannelEventFiltered(const AzFramework::InputChannel& inp
 
     if (inputChannel.IsStateEnded() && m_bConsoleActive)
     {
-        m_nRepeatEventId = AzFramework::InputChannelId();
+        m_nRepeatEventId = s_nullRepeatEventId;
     }
 
     if (!inputChannel.IsStateBegan())
@@ -1314,27 +1306,27 @@ bool CXConsole::OnInputChannelEventFiltered(const AzFramework::InputChannel& inp
 
             if (modifierKeyStates.IsActive(AzFramework::ModifierKeyMask::CtrlAny))
             {
-                strcpy(szCombinedName,                "ctrl_");
+                azstrcpy(szCombinedName, AZ_ARRAY_SIZE(szCombinedName), "ctrl_");
                 iLen += 5;
             }
             if (modifierKeyStates.IsActive(AzFramework::ModifierKeyMask::ShiftAny))
             {
-                strcpy(&szCombinedName[iLen], "shift_");
+                azstrcpy(&szCombinedName[iLen], AZ_ARRAY_SIZE(szCombinedName) - iLen, "shift_");
                 iLen += 6;
             }
             if (modifierKeyStates.IsActive(AzFramework::ModifierKeyMask::AltAny))
             {
-                strcpy(&szCombinedName[iLen], "alt_");
+                azstrcpy(&szCombinedName[iLen], AZ_ARRAY_SIZE(szCombinedName) - iLen, "alt_");
                 iLen += 4;
             }
             if (modifierKeyStates.IsActive(AzFramework::ModifierKeyMask::SuperAny))
             {
-                strcpy(&szCombinedName[iLen], "win_");
+                azstrcpy(&szCombinedName[iLen], AZ_ARRAY_SIZE(szCombinedName) - iLen, "win_");
                 iLen += 4;
             }
 
             assert(sizeof(szCombinedName) > (iLen + strlen(channelId.GetName()) + 1));
-            strcpy(&szCombinedName[iLen], channelId.GetName());
+            azstrcpy(&szCombinedName[iLen], AZ_ARRAY_SIZE(szCombinedName) - iLen, channelId.GetName());
 
             cmd = FindKeyBind(szCombinedName);
         }
@@ -1367,7 +1359,7 @@ bool CXConsole::OnInputChannelEventFiltered(const AzFramework::InputChannel& inp
         if (m_bActivationKeyEnable)
         {
             ShowConsole(!GetStatus());
-            m_nRepeatEventId = AzFramework::InputChannelId();
+            m_nRepeatEventId = s_nullRepeatEventId;
             m_bIsConsoleKeyPressed = true;
             return true;
         }
@@ -1406,8 +1398,8 @@ bool CXConsole::OnInputChannelEventFiltered(const AzFramework::InputChannel& inp
 bool CXConsole::OnInputTextEventFiltered(const AZStd::string& textUTF8)
 {
 #ifdef PROCESS_XCONSOLE_INPUT
-    // Ignore tilde/accent character since it is reserved for toggling the console
-    const bool isTilde = (textUTF8 == "~" || textUTF8 == "`");
+    // Ignore tilde/accent/power of two character since it is reserved for toggling the console
+    const bool isTilde = (textUTF8 == "~" || textUTF8 == "`" || textUTF8 == "\xC2\xB2");
     if (m_bConsoleActive && !isTilde)
     {
         AddInputUTF8(textUTF8);
@@ -1603,8 +1595,6 @@ const char* CXConsole::GetHistoryElement(const bool bUpOrDown)
 //////////////////////////////////////////////////////////////////////////
 void CXConsole::Draw()
 {
-    ScopedSwitchToGlobalHeap useGlobalHeap;
-
     //ShowConsole(true);
     if (!m_pSystem || !m_nTempScrollMax)
     {
@@ -1713,19 +1703,44 @@ void CXConsole::DrawBuffer(int nScrollPos, const char* szEffect)
 {
     if (m_pFont && m_pRenderer)
     {
+        // The scroll position is in pixels for a 800x600 screen so we scale it to the current resolution.
+        Vec2 referenceSize(800.0f, 600.0f);
+        const float fontSizeIn800x600 = 14;
+        const float maxYPos = nScrollPos * (m_pRenderer->GetHeight() / referenceSize.y);
+        // We also scale the font from the original 800x600 size
+        float fontSize = fontSizeIn800x600 * (m_pRenderer->GetWidth() / referenceSize.x);
+        const float fontAspectRatio = 0.75f;
+        float minFontSize = 10.f;
+        float maxFontSize = 50.f;
+        ICVar* minFontCVar = GetCVar("r_minConsoleFontSize");
+        if (minFontCVar)
+        {
+            minFontSize = minFontCVar->GetFVal();
+        }
+
+        ICVar* maxFontCVar = GetCVar("r_maxConsoleFontSize");
+        if (maxFontCVar)
+        {
+            maxFontSize = maxFontCVar->GetFVal();
+        }
+
+        // Limit max font size in case minFontSize > maxFontSize
+        maxFontSize = AZStd::max(minFontSize, maxFontSize);
+        fontSize = AZStd::min(AZStd::max(fontSize, minFontSize), maxFontSize);
+
         STextDrawContext ctx;
         //ctx.Reset();
         ctx.SetEffect(m_pFont->GetEffectId(szEffect));
         ctx.SetProportional(false);
         ctx.SetCharWidthScale(0.5f);
-        ctx.SetSize(Vec2(14, 14));
+        ctx.SetSize(Vec2(fontSize, fontAspectRatio * fontSize));
         ctx.SetColor(ColorF(1, 1, 1, 1));
         ctx.SetFlags(eDrawText_CenterV | eDrawText_2D);
 
         float csize = 0.8f * ctx.GetCharHeight();
-        ctx.SetSizeIn800x600(true);
+        ctx.SetSizeIn800x600(false);
 
-        float yPos = nScrollPos - csize - 3.0f;
+        float yPos = maxYPos - csize - 3.0f;
         float xPos = LINE_BORDER;
 
         float fCharWidth = (ctx.GetCharWidth() * ctx.GetCharWidthScale());
@@ -2006,33 +2021,33 @@ void CXConsole::AuditCVars(IConsoleCmdArgs* pArg)
         {
             const char* arg = pArg->GetArg(numArgs - 1);
 
-            if (_stricmp(arg, "cheat") == 0)
+            if (azstricmp(arg, "cheat") == 0)
             {
                 excludeMask &= ~cheatMask;
             }
 
-            if (_stricmp(arg, "const") == 0)
+            if (azstricmp(arg, "const") == 0)
             {
                 excludeMask &= ~constMask;
             }
 
-            if (_stricmp(arg, "readonly") == 0)
+            if (azstricmp(arg, "readonly") == 0)
             {
                 excludeMask &= ~readOnlyMask;
             }
 
-            if (_stricmp(arg, "dev") == 0)
+            if (azstricmp(arg, "dev") == 0)
             {
                 excludeMask &= ~devOnlyMask;
             }
 
-            if (_stricmp(arg, "dedi") == 0)
+            if (azstricmp(arg, "dedi") == 0)
             {
                 excludeMask &= ~dediOnlyMask;
             }
 
 #if defined(CVARS_WHITELIST)
-            if (_stricmp(arg, "whitelist") == 0)
+            if (azstricmp(arg, "whitelist") == 0)
             {
                 excludeWhitelist = false;
             }
@@ -2120,7 +2135,8 @@ void CXConsole::AuditCVars(IConsoleCmdArgs* pArg)
 #ifndef _RELEASE
 void CXConsole::DumpCommandsVarsTxt(const char* prefix)
 {
-    FILE* f0 = fopen("consolecommandsandvars.txt", "w");
+    FILE* f0 = nullptr;
+    azfopen(&f0, "consolecommandsandvars.txt", "w");
 
     if (!f0)
     {
@@ -2171,8 +2187,8 @@ void CXConsole::DumpCommandsVarsTxt(const char* prefix)
 
 void CXConsole::DumpVarsTxt(const bool includeCheat)
 {
-    FILE* f0 = fopen("consolevars.txt", "w");
-
+    FILE* f0 = nullptr;
+    azfopen(&f0, "consolevars.txt", "w");
     if (!f0)
     {
         return;
@@ -2258,8 +2274,7 @@ void CXConsole::ExecuteString(const char* command, const bool bSilentMode, const
         m_deferredExecution = oldDeferredExecution;
     }
     else
-    {
-        ScopedSwitchToGlobalHeap globalHeap;
+    {        
         m_deferredCommands.push_back(SDeferredCommand(str.c_str(), bSilentMode));
     }
 }
@@ -2285,8 +2300,6 @@ void CXConsole::ResetCVarsToDefaults()
 
 void CXConsole::SplitCommands(const char* line, std::list<string>& split)
 {
-    ScopedSwitchToGlobalHeap globalHeap;
-
     const char* start = line;
     string working;
 
@@ -2371,8 +2384,6 @@ void CXConsole::ExecuteStringInternal(const char* command, const bool bFromConso
         string::size_type nPos;
 
         {
-            ScopedSwitchToGlobalHeap globalHeap;
-
             sTemp = lineCommands.front();
             sCommand = lineCommands.front();
             sLineCommand = sCommand;
@@ -2425,8 +2436,7 @@ void CXConsole::ExecuteStringInternal(const char* command, const bool bFromConso
                     m_blockCounter++;
                 }
 
-                {
-                    ScopedSwitchToGlobalHeap globalHeap;
+                {   
                     sTemp = sLineCommand;
                 }
                 ExecuteCommand((itrCmd->second), sTemp);
@@ -2576,8 +2586,6 @@ void CXConsole::ExecuteCommand(CConsoleCommand& cmd, string& str, bool bIgnoreDe
     size_t t;
 
     {
-        ScopedSwitchToGlobalHeap globalHeap;
-
         t = 1;
 
         const char* start = str.c_str();
@@ -2643,8 +2651,6 @@ void CXConsole::ExecuteCommand(CConsoleCommand& cmd, string& str, bool bIgnoreDe
 
     string buf;
     {
-        ScopedSwitchToGlobalHeap globalHeap;
-
         // only do this for commands with script implementation
         for (;; )
         {
@@ -2701,7 +2707,7 @@ void CXConsole::ExecuteCommand(CConsoleCommand& cmd, string& str, bool bIgnoreDe
             for (unsigned int i = 1; i <= args.size(); i++)
             {
                 char pat[10];
-                sprintf(pat, "%%%d", i);
+                azsprintf(pat, "%%%d", i);
                 size_t pos = buf.find(pat);
                 if (pos == string::npos)
                 {
@@ -2747,7 +2753,7 @@ void CXConsole::Exit(const char* szExitComments, ...)
     }
     else
     {
-        strcpy(sResultMessageText, "No comments from application");
+        azstrcpy(sResultMessageText, AZ_ARRAY_SIZE(sResultMessageText), "No comments from application");
     }
 
     CryFatalError("%s", sResultMessageText);
@@ -2780,8 +2786,6 @@ void CXConsole::ResetAutoCompletion()
 //////////////////////////////////////////////////////////////////////////
 const char* CXConsole::ProcessCompletion(const char* szInputBuffer)
 {
-    ScopedSwitchToGlobalHeap useGlobalHeap;
-
     m_sInputBuffer = szInputBuffer;
 
     int offset = (szInputBuffer[0] == '\\' ? 1 : 0);        // legacy support
@@ -2998,7 +3002,7 @@ void CXConsole::DisplayVarValue(ICVar* pVar)
         {
             if (iRealState == -1)
             {
-                strcpy(szRealState, " RealState=Custom");
+                azstrcpy(szRealState, AZ_ARRAY_SIZE(szRealState), " RealState=Custom");
             }
             else
             {
@@ -3022,7 +3026,7 @@ void CXConsole::DisplayVarValue(ICVar* pVar)
             if (nonAlphaBits != 0)
             {
                 char nonAlphaChars[3];  // 1..63 + '\0'
-                sValue += itoa(nonAlphaBits, nonAlphaChars, 10);
+                sValue += azitoa(nonAlphaBits, nonAlphaChars, AZ_ARRAY_SIZE(nonAlphaChars), 10);
                 sValue += ", ";
             }
             sValue += alphaChars;
@@ -3126,10 +3130,7 @@ void CXConsole::PostLine(const char* lineOfText, size_t len)
     string line;
 
     {
-        ScopedSwitchToGlobalHeap useGlobalHeap;
-
         line = string(lineOfText, len);
-
         m_dqConsoleBuffer.push_back(line);
     }
 
@@ -3223,9 +3224,6 @@ void CXConsole::SetLoadingImage(const char* szFilename)
 void CXConsole::AddOutputPrintSink(IOutputPrintSink* inpSink)
 {
     assert(inpSink);
-
-    ScopedSwitchToGlobalHeap globalHeap;
-
     m_OutputSinks.push_back(inpSink);
 }
 
@@ -3263,8 +3261,6 @@ void CXConsole::AddLinePlus(const char* inputStr)
     string str, tmpStr;
 
     {
-        ScopedSwitchToGlobalHeap useGlobalHeap;
-
         if (!m_dqConsoleBuffer.size())
         {
             return;
@@ -3317,8 +3313,6 @@ void CXConsole::AddLinePlus(const char* inputStr)
 //////////////////////////////////////////////////////////////////////////
 void CXConsole::AddInputUTF8(const AZStd::string& textUTF8)
 {
-    ScopedSwitchToGlobalHeap useGlobalHeap;
-
     // Ignore control characters like backspace and tab
     AZStd::string textUTF8ToInsert;
     for (int i = 0; i < textUTF8.length(); ++i)
@@ -3411,8 +3405,6 @@ void CXConsole::RemoveInputChar(bool bBackSpace)
 //////////////////////////////////////////////////////////////////////////
 void CXConsole::AddCommandToHistory(const char* szCommand)
 {
-    ScopedSwitchToGlobalHeap useGlobalHeap;
-
     assert(szCommand);
 
     m_nHistoryPos = -1;
@@ -3451,21 +3443,20 @@ void CXConsole::Copy()
         return;
     }
 
-    size_t cbLength = m_sInputBuffer.length();
+    size_t stringLength = m_sInputBuffer.length();
+    size_t requiredBufferSize = stringLength + 1; // for the null
 
-    HGLOBAL hGlobal;
-    LPVOID  pGlobal;
-
-    hGlobal = GlobalAlloc(GHND, cbLength + 1);
-    pGlobal = GlobalLock (hGlobal);
-
-    strcpy((char*)pGlobal, m_sInputBuffer.c_str());
-
-    GlobalUnlock(hGlobal);
-
-    EmptyClipboard();
-    SetClipboardData(CF_TEXT, hGlobal);
-    CloseClipboard();
+    if (HGLOBAL hGlobal = GlobalAlloc(GHND, requiredBufferSize))
+    {
+        if (LPVOID  pGlobal = GlobalLock(hGlobal))
+        {
+            azstrcpy((char*)pGlobal, requiredBufferSize, m_sInputBuffer.c_str());
+            GlobalUnlock(hGlobal);
+            EmptyClipboard();
+            SetClipboardData(CF_TEXT, hGlobal);
+            CloseClipboard();
+        }
+    }
 
     return;
 #endif //WIN32
@@ -3874,7 +3865,7 @@ const char* CXConsole::AutoComplete(const char* substr)
         const char* szCmd = cmds[i];
 
         size_t cmdlen = strlen(szCmd);
-        if (cmdlen >= substrLen && memicmp(szCmd, substr, substrLen) == 0)
+        if (cmdlen >= substrLen && azmemicmp(szCmd, substr, substrLen) == 0)
         {
             if (substrLen == cmdlen)
             {
@@ -3918,7 +3909,7 @@ const char* CXConsole::AutoCompletePrev(const char* substr)
 
     for (unsigned int i = 0; i < cmdCount; i++)
     {
-        if (_stricmp(substr, cmds[i]) == 0)
+        if (azstricmp(substr, cmds[i]) == 0)
         {
             if (i > 0)
             {

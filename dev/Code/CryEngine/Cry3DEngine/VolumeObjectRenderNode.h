@@ -77,7 +77,7 @@ private:
 
 private:
     static CVolumeShadowCreator* ms_pVolShadowCreator;
-    static VolumeObjectSet ms_volumeObjects;
+    static StaticInstance<VolumeObjectSet> ms_volumeObjects;
 
     static ICVar* ms_CV_volobj_stats;
     static int e_volobj_stats;
@@ -108,7 +108,7 @@ private:
     CREVolumeObject* m_pRE[RT_COMMAND_BUF_COUNT];
 
     CVolumeDataItem* m_pVolDataItem;
-    CREVolumeObject::IVolumeTexture* m_pVolShadTex;
+    IVolumeTexture* m_pVolShadTex;
 };
 
 #endif // CRYINCLUDE_CRY3DENGINE_VOLUMEOBJECTRENDERNODE_H

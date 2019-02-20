@@ -10,6 +10,7 @@
 *
 */
 #include "StdAfx.h"
+#include <Common/RenderCapabilities.h>
 #include "Implementation/GLCommon.hpp"
 
 namespace RenderCapabilities
@@ -44,25 +45,30 @@ namespace RenderCapabilities
         return false;
     }
 
-    bool SupportsFrameBufferFetches()
+    FrameBufferFetchMask GetFrameBufferFetchCapabilities()
     {
-        return true;
+        FrameBufferFetchMask mask;
+        mask.set(FBF_ALL_COLORS);
+        mask.set(FBF_COLOR0);
+        return mask;
     }
     
     bool SupportsDepthClipping()
     {
+        //https://developer.apple.com/documentation/metal/mtlrendercommandencoder/1516267-setdepthclipmode?language=objc
 #if defined(AZ_PLATFORM_APPLE_OSX)
-        return NCryMetal::s_isOsxMinVersion10_11;
+        //There is a bug with the drivers where setDepthClipMode: MTLDepthClipModeClamp does not work. 
+        //Until that is fixed we are simulating this behavior in the vertex shader
+        //return NCryMetal::s_isOsxMinVersion10_11;
+        return false;
 #else
+        //There is a bug with the drivers where setDepthClipMode: MTLDepthClipModeClamp does not work. 
+        //Until that is fixed we are simulating this behavior in the vertex shader
+        //return NCryMetal::s_isIosMinVersion11_0;
         return false;
 #endif
     }
     
-    void CacheMinOSVersionInfo()
-    {
-        NCryMetal::CacheMinOSVersionInfo();
-    }
-
     bool SupportsDualSourceBlending()
     {
         // Metal supports dual source blending for devices running OXS >= 10.12 or iOS >= 11.0
@@ -94,6 +100,11 @@ namespace RenderCapabilities
     }
 	
 	bool SupportsStructuredBuffer(EShaderStage stage)
+    {
+        return true;
+    }
+
+    bool SupportsIndependentBlending()
     {
         return true;
     }

@@ -24,6 +24,9 @@
 #include <IPhysics.h>
 #include <IRenderAuxGeom.h>
 
+#if defined(INCLUDE_AUDIO_PRODUCTION_CODE)
+#include <AzCore/Math/Color.h>
+#endif // INCLUDE_AUDIO_PRODUCTION_CODE
 
 namespace Audio
 {
@@ -649,79 +652,6 @@ namespace Audio
 
                     m_oFileCacheMgr.UpdateLocalizedFileCacheEntries();
                     eResult = eARS_SUCCESS;
-                    break;
-                }
-                case eAMRT_RETRIGGER_AUDIO_CONTROLS:
-                {
-                #if defined(INCLUDE_AUDIO_PRODUCTION_CODE)
-                    CAudioObjectManager::TActiveObjectMap const& rActiveAudioObjects = m_oAudioObjectMgr.GetActiveAudioObjects();
-                    CAudioObjectManager::TActiveObjectMap::const_iterator IterAudioObjects(rActiveAudioObjects.begin());
-                    CAudioObjectManager::TActiveObjectMap::const_iterator const IterAudioObjectsEnd(rActiveAudioObjects.end());
-
-                    for (; IterAudioObjects != IterAudioObjectsEnd; ++IterAudioObjects)
-                    {
-                        CATLAudioObject* const pAudioObject = IterAudioObjects->second;
-
-                        // First set the audio object's position.
-                        if (pAudioObject->HasPosition())
-                        {
-                            AudioSystemImplementationRequestBus::Broadcast(&AudioSystemImplementationRequestBus::Events::SetPosition, pAudioObject->GetImplDataPtr(), pAudioObject->GetPosition());
-                        }
-
-                        // Then re-trigger its active events.
-                        TObjectEventSet const& rActiveEvents = pAudioObject->GetActiveEvents();
-                        TObjectEventSet::const_iterator IterActiveEvents(rActiveEvents.begin());
-                        TObjectEventSet::const_iterator const IterActiveEventsEnd(rActiveEvents.end());
-
-                        for (; IterActiveEvents != IterActiveEventsEnd; ++IterActiveEvents)
-                        {
-                            const CATLEvent* const pEvent = m_oAudioEventMgr.LookupID(*IterActiveEvents);
-                            AZ_Assert(pEvent->IsPlaying(), "ATL ProcessAudioManagerRequest - Retriggering encountered an 'active' event that isn't playing!");
-
-                            const CATLTrigger* const pTrigger = stl::find_in_map(m_cTriggers, pEvent->m_nTriggerID, nullptr);
-
-                            if (pTrigger)
-                            {
-                                CATLTrigger::TImplPtrVec::const_iterator IterTriggerImpl(pTrigger->m_cImplPtrs.begin());
-                                CATLTrigger::TImplPtrVec::const_iterator const IterTriggerImplEnd(pTrigger->m_cImplPtrs.end());
-
-                                for (; IterTriggerImpl != IterTriggerImplEnd; ++IterTriggerImpl)
-                                {
-                                    const CATLTriggerImpl* const pTriggerImpl = *IterTriggerImpl;
-                                    const EATLSubsystem eReceiver = pTriggerImpl->GetReceiver();
-
-                                    switch (eReceiver)
-                                    {
-                                        case eAS_AUDIO_SYSTEM_IMPLEMENTATION:
-                                        {
-                                            AudioSystemImplementationRequestBus::Broadcast(&AudioSystemImplementationRequestBus::Events::ActivateTrigger,
-                                                pAudioObject->GetImplDataPtr(),
-                                                pTriggerImpl->m_pImplData,
-                                                pEvent->m_pImplData,
-                                                INVALID_AUDIO_SOURCE_ID);
-                                            break;
-                                        }
-                                        case eAS_ATL_INTERNAL:
-                                        {
-                                            ActivateInternalTrigger(
-                                                pAudioObject,
-                                                pTriggerImpl->m_pImplData,
-                                                pEvent->m_pImplData);
-                                            break;
-                                        }
-                                        default:
-                                        {
-                                            g_audioLogger.Log(eALT_ERROR, "Unknown ATL Recipient");
-                                            break;
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    eResult = eARS_SUCCESS;
-                #endif // INCLUDE_AUDIO_PRODUCTION_CODE
                     break;
                 }
                 case eAMRT_DRAW_DEBUG_INFO:
@@ -2163,7 +2093,7 @@ namespace Audio
 
             const float* fColorNumbers = fColorBlue;
 
-            uint32 activeListenerID = 0;
+            TAudioObjectID activeListenerID = INVALID_AUDIO_OBJECT_ID;
             if (CATLListenerObject* overrideListener = m_oAudioListenerMgr.LookupID(m_oAudioListenerMgr.GetOverrideListenerID()))
             {
                 activeListenerID = overrideListener->GetID();
@@ -2175,7 +2105,7 @@ namespace Audio
 
             fPosY += fLineHeight;
             pAuxGeom->Draw2dLabel(fPosX, fPosY, 1.35f, fColorListener, false,
-                "Listener <%u> PosXYZ: %.2f %.2f %.2f FwdXYZ: %.2f %.2f %.2f",
+                "Listener <%llu> PosXYZ: %.2f %.2f %.2f FwdXYZ: %.2f %.2f %.2f",
                 activeListenerID,
                 vPos.x, vPos.y, vPos.z,
                 vFwd.x, vFwd.y, vFwd.z);
@@ -2197,10 +2127,15 @@ namespace Audio
     {
         m_oFileCacheMgr.DrawDebugInfo(auxGeom, fPosX, fPosY);
 
+        if ((g_audioCVars.m_nDrawAudioDebug & eADDF_SHOW_IMPL_MEMORY_POOL_USAGE) != 0)
+        {
+            DrawImplMemoryPoolDebugInfo(auxGeom, fPosX, fPosY);
+        }
+
         if ((g_audioCVars.m_nDrawAudioDebug & eADDF_SHOW_ACTIVE_OBJECTS) != 0)
         {
             m_oAudioObjectMgr.DrawDebugInfo(auxGeom, fPosX, fPosY);
-            fPosX += 300.0f;
+            fPosX += 800.0f;
         }
 
         if ((g_audioCVars.m_nDrawAudioDebug & eADDF_SHOW_ACTIVE_EVENTS) != 0)
@@ -2211,6 +2146,127 @@ namespace Audio
         if ((g_audioCVars.m_nDrawAudioDebug & eADDF_DRAW_LISTENER_SPHERE) != 0)
         {
             m_oAudioListenerMgr.DrawDebugInfo(auxGeom);
+        }
+    }
+
+    ///////////////////////////////////////////////////////////////////////////////////////////////////
+    void BytesToString(AZ::u32 bytes, char* buffer, AZStd::size_t bufLength)
+    {
+        if (bytes < (1 << 10))
+        {
+            azsnprintf(buffer, bufLength, "%u B", bytes);
+        }
+        else if (bytes < (1 << 20))
+        {
+            azsnprintf(buffer, bufLength, "%.1f KB", static_cast<float>(bytes) / static_cast<float>(1 << 10));
+        }
+        else
+        {
+            azsnprintf(buffer, bufLength, "%.1f MB", static_cast<float>(bytes) / static_cast<float>(1 << 20));
+        }
+    }
+
+    ///////////////////////////////////////////////////////////////////////////////////////////////////
+    void CAudioTranslationLayer::DrawImplMemoryPoolDebugInfo(IRenderAuxGeom& auxGeom, float fPosX, float fPosY)
+    {
+        const float colorMax = 0.9f;
+        const float colorMin = 0.1f;
+        const float textSize = 1.5f;
+        float color[4] = { colorMax, colorMax, colorMax, 0.9f };
+
+        const AZ::Color greenColor(colorMin, colorMax, colorMin, 0.9f);
+        const AZ::Color yellowColor(colorMax, colorMax, colorMin, 0.9f);
+        const AZ::Color redColor(colorMax, colorMin, colorMin, 0.9f);
+
+        const char* tableHeaderNames[8] = {
+            "ID",
+            "Name",
+            "Total Size",
+            "Used Size",
+            "Used %%",
+            "Peak Used",
+            "Allocs",
+            "Frees",
+        };
+        const float xTablePositions[8] = { 0.f, 40.f, 300.f, 400.f, 500.f, 600.f, 700.f, 800.f };
+
+        float posY = fPosY;
+
+        // Draw the header info:
+        for (int column = 0; column < 8; ++column)
+        {
+            auxGeom.Draw2dLabel(fPosX + xTablePositions[column], posY, 1.5f, color, false, tableHeaderNames[column]);
+        }
+
+        // Get the memory pool information...
+        AZStd::vector<AudioImplMemoryPoolInfo> poolInfos;
+        AudioSystemImplementationRequestBus::BroadcastResult(poolInfos, &AudioSystemImplementationRequestBus::Events::GetMemoryPoolInfo);
+
+        if (!poolInfos.empty())
+        {
+            const AZStd::size_t bufferSize = 32;
+            char buffer[bufferSize] = { 0 };
+
+            for (auto& poolInfo : poolInfos)
+            {
+                posY += 15.f;
+
+                auto percentUsed = static_cast<float>(poolInfo.m_memoryUsed) / static_cast<float>(poolInfo.m_memoryReserved);
+
+                // Calculate a color (green->-yellow->-red) based on percentage.
+                AZ::Color percentColor;
+                if (percentUsed < 0.5f)
+                {
+                    // This will show up as a javelin fork!  On the next integration, take this version and remove this comment.
+                    percentColor = greenColor.Lerp(yellowColor, percentUsed * 2.f);
+                }
+                else
+                {
+                    // This will show up as a javelin fork!  On the next integration, take this version and remove this comment.
+                    percentColor = yellowColor.Lerp(redColor, (percentUsed * 2.f) - 1.f);
+                }
+                percentColor.StoreToFloat4(color);
+
+                // ID
+                auxGeom.Draw2dLabel(
+                    fPosX + xTablePositions[0], posY, textSize, color, false, "%d", poolInfo.m_poolId);
+
+                // Name
+                auxGeom.Draw2dLabel(
+                    fPosX + xTablePositions[1], posY, textSize, color, false, "%s", poolInfo.m_poolName);
+
+                // Total Size (bytes)
+                BytesToString(poolInfo.m_memoryReserved, buffer, bufferSize);
+                auxGeom.Draw2dLabel(
+                    fPosX + xTablePositions[2], posY, textSize, color, false, "%s", buffer);
+
+                // Used Size (bytes)
+                BytesToString(poolInfo.m_memoryUsed, buffer, bufferSize);
+                auxGeom.Draw2dLabel(
+                    fPosX + xTablePositions[3], posY, textSize, color, false, "%s", buffer);
+
+                // Used %
+                auxGeom.Draw2dLabel(
+                    fPosX + xTablePositions[4], posY, textSize, color, false, "%.1f %%", percentUsed * 100.f);
+
+                // Peak Used (bytes)
+                BytesToString(poolInfo.m_peakUsed, buffer, bufferSize);
+                auxGeom.Draw2dLabel(
+                    fPosX + xTablePositions[5], posY, textSize, color, false, "%s", buffer);
+
+                // Allocs
+                auxGeom.Draw2dLabel(
+                    fPosX + xTablePositions[6], posY, textSize, color, false, "%u", poolInfo.m_numAllocs);
+
+                // Frees
+                auxGeom.Draw2dLabel(
+                    fPosX + xTablePositions[7], posY, textSize, color, false, "%u", poolInfo.m_numFrees);
+            }
+        }
+        else
+        {
+            auxGeom.Draw2dLabel(
+                fPosX, posY + 15.f, 1.5f, color, false, "No memory pool information is available for display!");
         }
     }
 

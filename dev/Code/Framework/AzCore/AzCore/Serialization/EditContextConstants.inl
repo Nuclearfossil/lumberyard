@@ -49,7 +49,26 @@ namespace AZ
             const static AZ::Crc32 RemoveNotify = AZ_CRC("RemoveNotify", 0x16ec95f5);
             const static AZ::Crc32 ChangeNotify = AZ_CRC("ChangeNotify", 0xf793bc19);
 
+            /**
+            * Specifies a function to accept or reject a value changed in the Lumberyard Editor.
+            * For example, a component could reject AZ::EntityId values that reference its own entity.
+            *
+            * **Element type to use this with:**   Any type that you reflect using AZ::EditContext::ClassInfo::DataElement().
+            *
+            * **Expected value type:**             A function with signature `bool fn(void* newValue, const AZ::TypeId& valueType)`.
+            *                                      If the function returns false, then the new value will not be applied.
+            *                                      `newValue` is a void* pointing at the new value being validated.
+            *                                      `valueType` is the type ID of the value pointed to by `newValue`.
+            *
+            * **Default value:**                   None
+            */
+            const AZ::Crc32 ChangeValidate = AZ_CRC("ChangeValidate", 0xc65d7180);
+
+            //! Used to bind a callback to the editing complete event of a string line edit control.
+            const static AZ::Crc32 StringLineEditingCompleteNotify = AZ_CRC("StringLineEditingCompleteNotify", 0x139e5fa9);
+
             const static AZ::Crc32 NameLabelOverride = AZ_CRC("NameLabelOverride", 0x9ff79cab);
+            const static AZ::Crc32 ChildNameLabelOverride = AZ_CRC("ChildNameLabelOverride", 0x73dd2909);
             const static AZ::Crc32 DescriptionTextOverride = AZ_CRC("DescriptionTextOverride", 0x608b64a8);
 
             const static AZ::Crc32 PrimaryAssetType = AZ_CRC("PrimaryAssetType", 0xa400a5ce);
@@ -117,15 +136,28 @@ namespace AZ
             const static AZ::Crc32 PropertyPosition = AZ_CRC("Position", 0x462ce4f5);
             const static AZ::Crc32 PropertyRotation = AZ_CRC("Rotation", 0x297c98f1);
             const static AZ::Crc32 PropertyScale = AZ_CRC("Scale", 0xec462584);
+            const static AZ::Crc32 PropertyHidden = AZ_CRC("Hidden", 0x885de9bd);
+
+            // Specifies a vector<Crc32> of platform tags that must *all* be set on the current platform for the component to be exported.
+            const static AZ::Crc32 ExportIfAllPlatformTags = AZ_CRC("ExportIfAllPlatformTags", 0x572ad424);
+
+            // Specifies a vector<Crc32> of platform tags, of which at least one must be set on the current platform for the component to be exported.
+            const static AZ::Crc32 ExportIfAnyPlatformTags = AZ_CRC("ExportIfAnyPlatformTags", 0x1f6c0540);
+
+            // Binds to a function (static or member) to allow for dynamic (runtime) slice exporting of custom editor components.
+            const static AZ::Crc32 RuntimeExportCallback = AZ_CRC("RuntimeExportCallback", 0x4b52dc01);
 
             // Attribute for storing a Id Generator function used by GenerateNewIdsAndFixRefs to remapping old id's to new id's
             const static AZ::Crc32 IdGeneratorFunction = AZ_CRC("IdGeneratorFunction", 0x4269a3fd);
 
             // Attribute for tagging a System Component for use in certain contexts
             const static AZ::Crc32 SystemComponentTags = AZ_CRC("SystemComponentTags", 0x2d8bebc9);
-
-            // Attribute for providing a custom UI Handler - can be used with Attribute() (or with ElementAttribute() for containers such as vectors, to specify the handler for container elements (i.e. vectors))
+            
+	    // Attribute for providing a custom UI Handler - can be used with Attribute() (or with ElementAttribute() for containers such as vectors, to specify the handler for container elements (i.e. vectors))
             const static AZ::Crc32 Handler = AZ_CRC("Handler", 0x939715cd);
+
+            // Attribute for skipping a set amount of descendant elements which are not leaves when calculating property visibility
+            const static AZ::Crc32 VisibilitySkipNonLeafDepth = AZ_CRC("VisibilitySkipNonLeafDepth", 0x790293fa);
         }
 
 
@@ -183,6 +215,7 @@ namespace AZ
             const static AZ::Crc32 Show = AZ_CRC("PropertyVisibility_Show", 0xa43c82dd);
             const static AZ::Crc32 ShowChildrenOnly = AZ_CRC("PropertyVisibility_ShowChildrenOnly", 0xef428f20);
             const static AZ::Crc32 Hide = AZ_CRC("PropertyVisibility_Hide", 0x32ab90f7);
+            const static AZ::Crc32 HideChildren = AZ_CRC("PropertyVisibility_HideChildren", 0x13cbd01e);
         }
 
         namespace SliceFlags
@@ -194,12 +227,6 @@ namespace AZ
             const static AZ::u32 HideOnAdd                  = 1 << 5;   ///< When property/field/component class is being added to an entity, hide from Push Widget display
             const static AZ::u32 HideOnChange               = 1 << 6;   ///< When property/field/component class is being changed on an entity, hide from Push Widget display
             const static AZ::u32 HideOnRemove               = 1 << 7;   ///< When property/field/component class is being removed on an entity, hide from Push Widget display
-        }
-
-        namespace UISliceFlags
-        {
-            // IMPORANT: Start at the first bit NOT used by SliceFlags above.
-            const static AZ::u32 PushableEvenIfInvisible = 1 << 3;  ///< Deprecated - Used currently only by UI slices, and will be phased out in the future. Forces display of hidden fields on Push widget.
         }
 
     } // namespace Edit

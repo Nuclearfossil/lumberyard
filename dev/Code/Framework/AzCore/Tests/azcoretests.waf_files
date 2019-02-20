@@ -4,6 +4,7 @@
             "Main.cpp"
         ],
         "AzCore" : [
+            "AssetCommon.cpp",
             "AssetManager.cpp",
             "BehaviorContext.cpp",
             "Components.cpp",
@@ -13,6 +14,7 @@
             "Driller.cpp",
             "EBus.cpp",
             "EntityIdTests.cpp",
+            "EntityTests.cpp",
             "FileIOBaseTestTypes.h",
             "IPC.cpp",
             "Jobs.cpp",
@@ -29,18 +31,24 @@
             "Script.cpp",
             "ScriptMath.cpp",
             "Serialization.cpp",
+            "SerializeContextFixture.h",
             "Slice.cpp",
             "State.cpp",
             "SystemFile.cpp",
             "TickBusTest.cpp",
             "TestTypes.h",
+            "UUIDTests.cpp",
             "XML.cpp"
+        ],
+        "AzCore/Math": [
+            "Math/QuaternionTests.cpp"
         ],
         "AZStd": [
             "AZStd/Algorithms.cpp",
             "AZStd/Allocators.cpp",
             "AZStd/Atomics.cpp",
             "AZStd/Any.cpp",
+            "AZStd/CreateDestroy.cpp",
             "AZStd/ConcurrentContainers.cpp",
             "AZStd/DequeAndSimilar.cpp",
             "AZStd/Examples.cpp",
@@ -54,6 +62,7 @@
             "AZStd/LockFreeStacks.cpp",
             "AZStd/Ordered.cpp",
             "AZStd/Parallel.cpp",
+            "AZStd/SetsIntrusive.cpp",
             "AZStd/SmartPtr.cpp",
             "AZStd/String.cpp",
             "AZStd/TypeTraits.cpp",

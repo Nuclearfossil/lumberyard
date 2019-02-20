@@ -91,7 +91,7 @@ public:
     bool ShadowLightPasses(const SRenderLight& light, const int nLightID);
     void DrawDecalVolume(const SDeferredDecal& rDecal, Matrix44A& mDecalLightProj, ECull volumeCull);
     void DrawLightVolume(EShapeMeshType meshType, const Matrix44& mVolumeToWorld, const Vec4& vSphereAdjust = Vec4(ZERO));
-    void LightPass(const SRenderLight* const __restrict pDL, bool bForceStencilDisable = false);
+    void LightPass(const SRenderLight* const __restrict pDL, bool bForceStencilDisable = false, bool ignoreShadowCasting =  false);
     void DeferredCubemaps(const TArray<SRenderLight>& rCubemaps, const uint32 nStartIndex = 0);
     void DeferredCubemapPass(const SRenderLight* const __restrict pDL);
     void ScreenSpaceReflectionPass();
@@ -197,6 +197,9 @@ public:
     void GetScissors(const Vec3& vCenter, float fRadius, short& sX, short& sY, short& sWidth, short& sHeight) const;
     void SetupScissors(bool bEnable, uint16 x, uint16 y, uint16 w, uint16 h) const;
 
+    // Calculate the individual screen-space scissor bounds for all of our bound lights
+    void CalculateLightScissorBounds();
+
     const Matrix44A& GetCameraProjMatrix() const { return m_mViewProj; }
 
 private:
@@ -244,6 +247,7 @@ private:
 
         m_pParamDecalTS = "g_mDecalTS";
         m_pParamDecalDiffuse = "g_DecalDiffuse";
+        m_pParamDecalAngleAttenuation = "g_DecalAngleAttenuation";
         m_pParamDecalSpecular = "g_DecalSpecular";
         m_pParamDecalMipLevels = "g_DecalMipLevels";
         m_pParamDecalEmissive = "g_DecalEmissive";
@@ -390,6 +394,7 @@ private:
 
     CCryNameR m_pParamDecalTS;
     CCryNameR m_pParamDecalDiffuse;
+    CCryNameR m_pParamDecalAngleAttenuation;
     CCryNameR m_pParamDecalSpecular;
     CCryNameR m_pParamDecalMipLevels;
     CCryNameR m_pParamDecalEmissive;
@@ -443,7 +448,7 @@ private:
 
     friend class CTiledShading;
 
-    static CPowerOf2BlockPacker m_blockPack;
+    static StaticInstance<CPowerOf2BlockPacker> m_blockPack;
     static TArray<SShadowAllocData> m_shadowPoolAlloc;
 
 public:

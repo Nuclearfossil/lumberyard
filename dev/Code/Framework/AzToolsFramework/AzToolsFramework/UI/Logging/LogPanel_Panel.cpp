@@ -19,7 +19,7 @@
 #include <AzCore/Component/Entity.h>
 #include <AzCore/Casting/lossy_cast.h>
 #include <AzCore/UserSettings/UserSettings.h>
-#include <AzCore/xml/rapidxml.h>
+#include <AzCore/XML/rapidxml.h>
 
 #include <AzFramework/StringFunc/StringFunc.h>
 
@@ -114,6 +114,13 @@ namespace AzToolsFramework
             layoutWidget->layout()->addWidget(pContextButton);
 
             layout()->addWidget(layoutWidget);
+
+            // ensure button size matches tab bar size
+            QWidget temp;
+            m_impl->pTabWidget->addTab(&temp, "");
+            layoutWidget->setFixedHeight(m_impl->pTabWidget->tabBar()->sizeHint().height());
+            m_impl->pTabWidget->removeTab(0);
+
             layout()->setContentsMargins(0, 0, 0, 0);
 
             connect(m_impl->pTabWidget, SIGNAL(tabCloseRequested(int)), this, SLOT(onTabClosed(int)));
@@ -564,6 +571,11 @@ namespace AzToolsFramework
                 {
                     return false;
                 }
+
+                if (sourceLine->GetLogType() == Logging::LogLine::TYPE_CONTEXT)
+                {
+                    return false;
+                }
             }
 
             bool showDebug = ((m_tabSettings.m_filterFlags & (0x01 << TabSettings::FILTER_DEBUG)) != 0);
@@ -649,7 +661,14 @@ namespace AzToolsFramework
             for (int pos = 0; pos < (int)m_children.size() - 1; ++pos)
             {
                 QLayoutItem* pItem = m_children[pos];
-                pItem->setGeometry(effectiveRect);
+                if (pItem->widget())
+                {
+                    pItem->widget()->setGeometry(effectiveRect);
+                }
+                else
+                {
+                    pItem->setGeometry(effectiveRect);
+                }
             }
 
             if (m_children.size())

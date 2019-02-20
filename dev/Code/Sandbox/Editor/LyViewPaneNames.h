@@ -29,7 +29,7 @@ namespace LyViewPane
     static const char* const SceneSettings = "Scene Settings (PREVIEW)";
     static const char* const AssetBrowser = "Asset Browser";
     static const char* const AssetEditor = "Asset Editor";
-    static const char* const EntityOutliner = "Entity Outliner (PREVIEW)";
+    static const char* const EntityOutliner = "Entity Outliner";
     static const char* const EntityInspector = "Entity Inspector";
     static const char* const EntityInspectorPinned = "Pinned Entity Inspector";
     static const char* const DeploymentTool = "Deployment Tool";
@@ -59,7 +59,7 @@ namespace LyViewPane
     static const char* const LegacyRollupBar = "RollupBar (LEGACY)";
     static const char* const LegacyRollupBarMenuName = "&RollupBar (LEGACY)";
 
-    static const char* const SliceRelationships = "Slice Relationship View";
+    static const char* const SliceRelationships = "Slice Relationship View (PREVIEW)";
     static const char* const LegacyGeppetto = "Geppetto Editor (LEGACY)";
     static const char* const LegacyMannequin = "Mannequin Editor (LEGACY)";
 

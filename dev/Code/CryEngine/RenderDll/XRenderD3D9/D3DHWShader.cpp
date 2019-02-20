@@ -25,13 +25,17 @@
 #include "../Common/TypedConstantBuffer.h"
 #include "GraphicsPipeline/FurBendData.h"
 #include "GraphicsPipeline/FurPasses.h"
+
+#if defined(AZ_RESTRICTED_PLATFORM)
+#undef AZ_RESTRICTED_SECTION
+#define D3DHWSHADER_CPP_SECTION_1 1
+#define D3DHWSHADER_CPP_SECTION_2 2
+#endif
+
 #if defined(FEATURE_SVO_GI)
 #include "D3D_SVO.h"
 #endif
 #include "../Cry3DEngine/Environment/OceanEnvironmentBus.h"
-
-#define MAX_PF_TEXTURES     (32)
-#define MAX_PF_SAMPLERS     (4)
 
 #ifdef WIN64
     #pragma warning(disable: 4244)
@@ -45,12 +49,12 @@ CHWShader_D3D::SHWSInstance *CHWShader_D3D::s_pCurInstVS; bool CHWShader_D3D::s_
 CHWShader_D3D::SHWSInstance *CHWShader_D3D::s_pCurInstPS; bool CHWShader_D3D::s_bFirstPS = true;
 
 #if !defined(_RELEASE)
-std::set<uint32_t> CHWShader_D3D::s_ErrorsLogged;
+AZStd::unordered_set<uint32_t, AZStd::hash<uint32_t>, AZStd::equal_to<uint32_t>, AZ::StdLegacyAllocator> CHWShader_D3D::s_ErrorsLogged;
 #endif
 
 int CHWShader_D3D::s_nActivationFailMask = 0;
 
-std::vector<SShaderTechniqueStat> g_SelectedTechs;
+AZStd::vector<SShaderTechniqueStat, AZ::StdLegacyAllocator> g_SelectedTechs;
 
 bool CHWShader_D3D::s_bInitShaders = true;
 
@@ -71,8 +75,8 @@ FXShaderCacheNames CHWShader::m_ShaderCacheList;
 //  Everything in the block should be pulled into its own file once stablized back to mainline.
 #pragma region ShaderConstants
 
-std::vector<SCGTexture> CHWShader_D3D::s_PF_Textures;        // Per-frame textures
-std::vector<STexSamplerRT> CHWShader_D3D::s_PF_Samplers;     // Per-frame samplers
+CHWShader_D3D::SCGTextures CHWShader_D3D::s_PF_Textures;     // Per-frame textures
+CHWShader_D3D::SCGSamplers CHWShader_D3D::s_PF_Samplers;     // Per-frame samplers
 
 namespace
 {
@@ -189,8 +193,8 @@ namespace
 }
 
 DynArray<SCGParamPool> CGParamManager::s_Pools;
-std::vector<SCGParamsGroup> CGParamManager::s_Groups;
-std::vector<uint32, stl::STLGlobalAllocator<uint32> > CGParamManager::s_FreeGroups;
+AZStd::vector<SCGParamsGroup, AZ::StdLegacyAllocator> CGParamManager::s_Groups;
+AZStd::vector<uint32, AZ::StdLegacyAllocator> CGParamManager::s_FreeGroups;
 
 SCGParamPool::SCGParamPool(int nEntries)
     : m_Params(new SCGParam[nEntries], nEntries)
@@ -511,7 +515,7 @@ namespace
         sData[0].f[3] = 0.0f;
     }
 
-    NO_INLINE CRendElementBase* sGetContainerRE0(CRendElementBase* pRE)
+    NO_INLINE IRenderElement* sGetContainerRE0(IRenderElement* pRE)
     {
         assert(pRE);    // someone assigned wrong shader - function should not be called then
 
@@ -532,19 +536,19 @@ namespace
             return;
         }
         // use render element from vertex container render mesh if available
-        CRendElementBase* pRE = sGetContainerRE0(r->m_RP.m_pRE);
+        IRenderElement* pRE = sGetContainerRE0(r->m_RP.m_pRE);
 
-        if (pRE && pRE->m_CustomData)
+        if (pRE && pRE->GetCustomData())
         {
             float* pData;
 
             if (SRendItem::m_RecurseLevel[r->m_RP.m_nProcessThreadID] <= 0)
             {
-                pData = (float*)pRE->m_CustomData;
+                pData = (float*)pRE->GetCustomData();
             }
             else
             {
-                pData = (float*)pRE->m_CustomData + 4;
+                pData = (float*)pRE->GetCustomData() + 4;
             }
 
             sData[0].f[0] = pData[2];
@@ -559,10 +563,10 @@ namespace
 
     NO_INLINE void sGetTerrainLayerGen(UFloat4* sData, CD3D9Renderer* r)
     {
-        CRendElementBase* pRE = r->m_RP.m_pRE;
-        if (pRE && pRE->m_CustomData)
+        IRenderElement* pRE = r->m_RP.m_pRE;
+        if (pRE && pRE->GetCustomData())
         {
-            float* pData = (float*)pRE->m_CustomData;
+            float* pData = (float*)pRE->GetCustomData();
             memcpy(sData, pData, sizeof(float) * 16);
         }
         else
@@ -1251,7 +1255,7 @@ namespace
             int texHeight = 512;
             int mipLevel = 0;
 
-            CRendElementBase *pRE = gRenDev->m_RP.m_pRE;
+            IRenderElement *pRE = gRenDev->m_RP.m_pRE;
 
             if (pRE)
             {
@@ -1318,7 +1322,7 @@ namespace
                 int texHeight = 512;
                 int mipLevel = 0;
 
-                CRendElementBase *pRE = gRenDev->m_RP.m_pRE;
+                IRenderElement *pRE = gRenDev->m_RP.m_pRE;
 
                 if (pRE)
                 {
@@ -1617,14 +1621,39 @@ namespace
             sData[0].f[3] = 1.0f;
             return;
         }
-
-        ColorF contrib;
-        r->GetFogVolumeContribution(pOD->m_FogVolumeContribIdx[rRP.m_nProcessThreadID], contrib);
+        SFogVolumeData fogVolData;
+        ColorF& contrib = fogVolData.fogColor;
+        r->GetFogVolumeContribution(pOD->m_FogVolumeContribIdx[rRP.m_nProcessThreadID], fogVolData);
         // Pre-multiply alpha (saves 1 instruction in pixel shader)
         sData[0].f[0] = contrib.r * (1 - contrib.a);
         sData[0].f[1] = contrib.g * (1 - contrib.a);
         sData[0].f[2] = contrib.b * (1 - contrib.a);
         sData[0].f[3] = contrib.a;
+        // Pass min & max of the aabb and cvar value.
+        sData[1].f[0] = fogVolData.avgAABBox.min.x;
+        sData[1].f[1] = fogVolData.avgAABBox.min.y;
+        sData[1].f[2] = fogVolData.avgAABBox.min.z;
+        static ICVar* pCVarFogVolumeShadingQuality = gEnv->pConsole->GetCVar("e_FogVolumeShadingQuality");
+
+        sData[1].f[3] = (pCVarFogVolumeShadingQuality->GetIVal() && fogVolData.avgAABBox.GetRadius() > 0.001f) ? 1.0f : 0.0f;
+
+        sData[2].f[0] = fogVolData.avgAABBox.max.x;
+        sData[2].f[1] = fogVolData.avgAABBox.max.y;
+        sData[2].f[2] = fogVolData.avgAABBox.max.z;
+        sData[2].f[3] = (fogVolData.avgAABBox.GetRadius() > 0.001f) ? 1.0f : 0.0f;
+
+        sData[3].f[0] = fogVolData.m_heightFallOffBasePoint.x;
+        sData[3].f[1] = fogVolData.m_heightFallOffBasePoint.y;
+        sData[3].f[2] = fogVolData.m_heightFallOffBasePoint.z;
+        sData[3].f[3] = fogVolData.m_densityOffset;
+        
+        sData[4].f[0] = fogVolData.m_heightFallOffDirScaled.x;
+        sData[4].f[1] = fogVolData.m_heightFallOffDirScaled.y;
+        sData[4].f[2] = fogVolData.m_heightFallOffDirScaled.z;
+        sData[4].f[3] = fogVolData.m_globalDensity;
+
+        sData[5].f[0] = Overlap::Point_AABB(r->GetViewParameters().vOrigin, fogVolData.avgAABBox);
+
     }
 
     NO_INLINE void sDLightsInfo(UFloat4* sData)
@@ -1802,14 +1831,14 @@ namespace
 
                 case ECGP_PB_FromRE:
                 {
-                    CRendElementBase* pRE = rRP.m_pRE;
-                    if (!pRE || !pRE->m_CustomData)
+                    IRenderElement* pRE = rRP.m_pRE;
+                    if (!pRE || !pRE->GetCustomData())
                     {
                         result[0].f[componentIndex] = 0;
                     }
                     else
                     {
-                        result[0].f[componentIndex] = reinterpret_cast<float*>(pRE->m_CustomData)[(parameter->m_nID >> (componentIndex * 8)) & 0xff];
+                        result[0].f[componentIndex] = reinterpret_cast<float*>(pRE->GetCustomData())[(parameter->m_nID >> (componentIndex * 8)) & 0xff];
                     }
                     break;
                 }
@@ -1822,7 +1851,12 @@ namespace
                     if (gcpRendD3D->FX_GetEnabledGmemPath(nullptr))
                     {
                         uint32 stencilRef = CRenderer::CV_r_VisAreaClipLightsPerPixel ? 0 : (rRP.m_RIs[0][0]->nStencRef | BIT_STENCIL_INSIDE_CLIPVOLUME);
-                        stencilRef |= (!(rRP.m_pCurObject->m_ObjFlags & FOB_DYNAMIC_OBJECT) | CRenderer::CV_r_deferredDecalsOnDynamicObjects ? BIT_STENCIL_RESERVED : 0);
+                        // Here we check if an object can receive decals.
+                        bool bObjectAcceptsDecals = !(rRP.m_pCurObject->m_NoDecalReceiver);
+                        if (bObjectAcceptsDecals)
+                        {
+                             stencilRef |= (!(rRP.m_pCurObject->m_ObjFlags & FOB_DYNAMIC_OBJECT) || CRenderer::CV_r_deferredDecalsOnDynamicObjects ? BIT_STENCIL_RESERVED : 0);
+                        }
                         result[0].f[0] = azlossy_caster(stencilRef);
                         result[0].f[1] = 0.0f;
                         result[0].f[2] = 0.0f;
@@ -2290,6 +2324,11 @@ void CD3D9Renderer::UpdatePerFrameParameters()
         PF.m_SunSpecularMultiplier = multiplier.x;
     }
 
+    // Set energy indicator representing the sun intensity compared to noon.
+    Vec3    dayNightIndicators;
+    p3DEngine->GetGlobalParameter(E3DPARAM_DAY_NIGHT_INDICATOR, dayNightIndicators);
+    PF.m_MidDayIndicator = dayNightIndicators.y;
+
     p3DEngine->GetGlobalParameter(E3DPARAM_CLOUDSHADING_SUNCOLOR, PF.m_CloudShadingColorSun);
     p3DEngine->GetGlobalParameter(E3DPARAM_CLOUDSHADING_SKYCOLOR, PF.m_CloudShadingColorSky);
 
@@ -2341,8 +2380,12 @@ void CD3D9Renderer::ForceUpdateGlobalShaderParameters()
 
 void CHWShader_D3D::UpdatePerFrameResourceGroup()
 {
-    mfSetTextures(s_PF_Textures, eHWSC_Pixel);
-    mfSetSamplers_Old(s_PF_Samplers, eHWSC_Pixel);
+    static std::vector<SCGTexture> s_textures;
+    static std::vector<STexSamplerRT> s_samplers;
+    s_textures.assign(s_PF_Textures.begin(), s_PF_Textures.end());
+    s_samplers.assign(s_PF_Samplers.begin(), s_PF_Samplers.end());
+    mfSetTextures(s_textures, eHWSC_Pixel);
+    mfSetSamplers_Old(s_samplers, eHWSC_Pixel);
 
     const PerFrameParameters& PF = gRenDev->m_cEF.m_PF;
     CD3D9Renderer* const __restrict rd = gcpRendD3D;
@@ -2951,9 +2994,9 @@ bool CHWShader_D3D::mfSetSamplers_Old(const std::vector<STexSamplerRT>& Samplers
 
         ++i;
 
-        if (tx >= &CTexture::s_ShaderTemplates[0] && tx <= &CTexture::s_ShaderTemplates[EFTT_MAX - 1])
+        if (tx >= &(*CTexture::s_ShaderTemplates)[0] && tx <= &(*CTexture::s_ShaderTemplates)[EFTT_MAX - 1])
         {
-            nTexMaterialSlot = (int)(tx - &CTexture::s_ShaderTemplates[0]);
+            nTexMaterialSlot = (int)(tx - &(*CTexture::s_ShaderTemplates)[0]);
 
             SEfResTexture*      pTextureRes = pSR ? pSR->GetTextureResource(nTexMaterialSlot) : nullptr;
             if (!pTextureRes)
@@ -3012,29 +3055,40 @@ bool CHWShader_D3D::mfSetSamplers_Old(const std::vector<STexSamplerRT>& Samplers
             int nCustomID = tx->GetCustomID();
             if (nCustomID <= 0)
             {
-                if (tx->UseDecalBorderCol())
+                if (nTState >= 0 && nTState < CTexture::s_TexStates.size())
                 {
-                    STexState TS = CTexture::s_TexStates[nTState];
-                    //TS.SetFilterMode(...); // already set up
-                    TS.SetClampMode(TADDR_CLAMP, TADDR_CLAMP, TADDR_CLAMP);
-                    nTState = CTexture::GetTexState(TS);
-                }
-
-                if (CRenderer::CV_r_texNoAnisoAlphaTest && (rd->m_RP.m_FlagsShader_RT & g_HWSR_MaskBit[HWSR_ALPHATEST]))
-                {
-                    STexState TS = CTexture::s_TexStates[nTState];
-                    if (TS.m_nAnisotropy > 1)
+                    if (tx->UseDecalBorderCol())
                     {
-                        TS.m_nAnisotropy = 1;
-                        TS.SetFilterMode(FILTER_TRILINEAR);
+                        STexState TS = CTexture::s_TexStates[nTState];
+                        //TS.SetFilterMode(...); // already set up
+                        TS.SetClampMode(TADDR_CLAMP, TADDR_CLAMP, TADDR_CLAMP);
                         nTState = CTexture::GetTexState(TS);
+                    }
+
+                    if (CRenderer::CV_r_texNoAnisoAlphaTest && (rd->m_RP.m_FlagsShader_RT & g_HWSR_MaskBit[HWSR_ALPHATEST]))
+                    {
+                    
+                        STexState TS = CTexture::s_TexStates[nTState];
+                        if (TS.m_nAnisotropy > 1)
+                        {
+                            TS.m_nAnisotropy = 1;
+                            TS.SetFilterMode(FILTER_TRILINEAR);
+                            nTState = CTexture::GetTexState(TS);
+                        }
                     }
                 }
 
                 tx->Apply(nTUnit, nTState, nTexMaterialSlot, nSUnit, SResourceView::DefaultView, eSHClass);
             }
-            else
+            else 
             {
+                // Allow render elements to set their own samplers
+                IRenderElement* pRE = rd->m_RP.m_pRE;
+                if (pRE && pRE->mfSetSampler(nCustomID, nTUnit, nTState, nTexMaterialSlot, nSUnit))
+                {
+                    continue;
+                }
+
                 switch (nCustomID)
                 {
                 case TO_FROMRE0:
@@ -3042,7 +3096,7 @@ bool CHWShader_D3D::mfSetSamplers_Old(const std::vector<STexSamplerRT>& Samplers
                 {
                     if (rd->m_RP.m_pRE)
                     {
-                        nCustomID = rd->m_RP.m_pRE->m_CustomTexBind[nCustomID - TO_FROMRE0];
+                        nCustomID = rd->m_RP.m_pRE->GetCustomTexBind(nCustomID - TO_FROMRE0);
                     }
                     else
                     {
@@ -3062,10 +3116,10 @@ bool CHWShader_D3D::mfSetSamplers_Old(const std::vector<STexSamplerRT>& Samplers
                 case TO_FROMRE1_FROM_CONTAINER:
                 {
                     // take render element from vertex container render mesh if available
-                    CRendElementBase* pRE = sGetContainerRE0(rd->m_RP.m_pRE);
-                    if (pRE)
+                    IRenderElement* _pRE = sGetContainerRE0(rd->m_RP.m_pRE);
+                    if (_pRE)
                     {
-                        nCustomID = pRE->m_CustomTexBind[nCustomID - TO_FROMRE0_FROM_CONTAINER];
+                        nCustomID = _pRE->GetCustomTexBind(nCustomID - TO_FROMRE0_FROM_CONTAINER);
                     }
                     else
                     {
@@ -3125,25 +3179,30 @@ bool CHWShader_D3D::mfSetSamplers_Old(const std::vector<STexSamplerRT>& Samplers
                         break;
                     }
 
-                    //force  MinFilter = Linear; MagFilter = Linear; for HW_PCF_FILTERING
-                    STexState TS = CTexture::s_TexStates[nTState];
-                    TS.m_pDeviceState = NULL;
-                    TS.SetClampMode(TADDR_CLAMP, TADDR_CLAMP, TADDR_CLAMP);
+                    if (nTState >= 0 && nTState < CTexture::s_TexStates.size())
+                    {
+                        //force  MinFilter = Linear; MagFilter = Linear; for HW_PCF_FILTERING
+                        STexState TS = CTexture::s_TexStates[nTState];
+                        TS.m_pDeviceState = NULL;
+                        TS.SetClampMode(TADDR_CLAMP, TADDR_CLAMP, TADDR_CLAMP);
 
-                    const bool bComparisonSampling = rd->m_RP.m_ShadowCustomComparisonSampling[nShadowMapNum];
-                    if (bComparisonSampling)
-                    {
-                        TS.SetFilterMode(FILTER_LINEAR);
-                        TS.SetComparisonFilter(true);
-                    }
-                    else
-                    {
-                        TS.SetFilterMode(FILTER_POINT);
-                        TS.SetComparisonFilter(false);
+                        const bool bComparisonSampling = rd->m_RP.m_ShadowCustomComparisonSampling[nShadowMapNum];
+                        if (bComparisonSampling)
+                        {
+                            TS.SetFilterMode(FILTER_LINEAR);
+                            TS.SetComparisonFilter(true);
+                        }
+                        else
+                        {
+                            TS.SetFilterMode(FILTER_POINT);
+                            TS.SetComparisonFilter(false);
+                        }
+
+                        nTState = CTexture::GetTexState(TS);
                     }
 
                     CTexture* tex = CTexture::GetByID(nCustomID);
-                    tex->Apply(nTUnit, CTexture::GetTexState(TS), nTexMaterialSlot, nSUnit, SResourceView::DefaultView, eSHClass);
+                    tex->Apply(nTUnit, nTState, nTexMaterialSlot, nSUnit, SResourceView::DefaultView, eSHClass);
                 }
                 break;
 
@@ -3423,10 +3482,10 @@ bool CHWShader_D3D::mfSetSamplers_Old(const std::vector<STexSamplerRT>& Samplers
                 case TO_VOLOBJ_SHADOW:
                 {
                     bool texBound(false);
-                    CRendElementBase* pRE(rd->m_RP.m_pRE);
-                    if (pRE && pRE->mfGetType() == eDATA_VolumeObject)
+                    IRenderElement* _pRE(rd->m_RP.m_pRE);
+                    if (_pRE && _pRE->mfGetType() == eDATA_VolumeObject)
                     {
-                        CREVolumeObject* pVolObj((CREVolumeObject*)pRE);
+                        CREVolumeObject* pVolObj((CREVolumeObject*)_pRE);
                         int texId(0);
                         if (pVolObj)
                         {
@@ -3484,10 +3543,10 @@ bool CHWShader_D3D::mfSetSamplers_Old(const std::vector<STexSamplerRT>& Samplers
                 case TO_SKYDOME_MIE:
                 case TO_SKYDOME_RAYLEIGH:
                 {
-                    CRendElementBase* pRE = rd->m_RP.m_pRE;
-                    if (pRE && pRE->mfGetType() == eDATA_HDRSky)
+                    IRenderElement* _pRE = rd->m_RP.m_pRE;
+                    if (_pRE && _pRE->mfGetType() == eDATA_HDRSky)
                     {
-                        CTexture* pTex = nCustomID == TO_SKYDOME_MIE ? ((CREHDRSky*)pRE)->m_pSkyDomeTextureMie : ((CREHDRSky*)pRE)->m_pSkyDomeTextureRayleigh;
+                        CTexture* pTex = nCustomID == TO_SKYDOME_MIE ? ((CREHDRSky*)_pRE)->m_pSkyDomeTextureMie : ((CREHDRSky*)_pRE)->m_pSkyDomeTextureRayleigh;
                         if (pTex)
                         {
                             pTex->Apply(nTUnit, -1, nTexMaterialSlot, nSUnit);
@@ -3500,10 +3559,10 @@ bool CHWShader_D3D::mfSetSamplers_Old(const std::vector<STexSamplerRT>& Samplers
 
                 case TO_SKYDOME_MOON:
                 {
-                    CRendElementBase* pRE = rd->m_RP.m_pRE;
-                    if (pRE && pRE->mfGetType() == eDATA_HDRSky)
+                    IRenderElement* _pRE = rd->m_RP.m_pRE;
+                    if (_pRE && _pRE->mfGetType() == eDATA_HDRSky)
                     {
-                        CREHDRSky* pHDRSky = (CREHDRSky*)pRE;
+                        CREHDRSky* pHDRSky = (CREHDRSky*)_pRE;
                         CTexture* pMoonTex(pHDRSky->m_moonTexId > 0 ? CTexture::GetByID(pHDRSky->m_moonTexId) : 0);
                         if (pMoonTex)
                         {
@@ -3620,9 +3679,9 @@ bool CHWShader_D3D::mfUpdateSamplers(CShader* shader)
             }
 
             //  [Shader System TO DO] - replace with proper data driven code reflected from the shaders 
-            if (tx >= &CTexture::s_ShaderTemplates[0] && tx <= &CTexture::s_ShaderTemplates[EFTT_MAX - 1])
+            if (tx >= &(*CTexture::s_ShaderTemplates)[0] && tx <= &(*CTexture::s_ShaderTemplates)[EFTT_MAX - 1])
             {
-                int             nSlot = (int)(tx - &CTexture::s_ShaderTemplates[0]);
+                int             nSlot = (int)(tx - &(*CTexture::s_ShaderTemplates)[0]);
                 int16           replacementSlot = -1;
                 SEfResTexture*  pTextureRes = pSRes->GetTextureResource(nSlot);
 
@@ -3714,7 +3773,6 @@ bool CHWShader_D3D::mfAddGlobalTexture(SCGTexture& Texture)
     if (i == s_PF_Textures.size())
     {
         s_PF_Textures.push_back(Texture);
-        assert(s_PF_Textures.size() <= MAX_PF_TEXTURES);
         return true;
     }
     return false;
@@ -4019,12 +4077,6 @@ void CHWShader_D3D::SHWSInstance::GetInstancingAttribInfo(uint8 Attributes[32], 
     }
 }
 
-void CHWShader_D3D::InitialiseContainers()
-{
-    s_PF_Textures.reserve(MAX_PF_TEXTURES);
-    s_PF_Samplers.reserve(MAX_PF_SAMPLERS);
-}
-
 void CHWShader_D3D::ShutDown()
 {
     CCryNameTSCRC Name;
@@ -4125,8 +4177,6 @@ CHWShader* CHWShader::mfForName(const char* name, const char* nameSource, uint32
         return NULL;
     }
 
-    MEMSTAT_CONTEXT_FMT(EMemStatContextTypes::MSC_Shader, 0, "%s", name);
-
     CHWShader_D3D* pSH = NULL;
     stack_string strName = name;
     CCryNameTSCRC className = mfGetClassName(eClass);
@@ -4140,36 +4190,8 @@ CHWShader* CHWShader::mfForName(const char* name, const char* nameSource, uint32
         strName += AddStr.Format("(%I64x)", nMaskGen);
 #endif
     }
-    if (CParserBin::m_nPlatform == SF_ORBIS) // ACCEPTED_USE
-    {
-        strName += AddStr.Format("(O)");
-    }
-    else
-    if (CParserBin::m_nPlatform == SF_DURANGO) // ACCEPTED_USE
-    {
-        strName += AddStr.Format("(D)");
-    }
-    else
-    if (CParserBin::m_nPlatform == SF_D3D11)
-    {
-        strName += AddStr.Format("(X1)", nMaskGen);
-    }
-    else
-    if (CParserBin::m_nPlatform == SF_GL4)
-    {
-        strName + AddStr.Format("(G4)", nMaskGen);
-    }
-    else
-    if (CParserBin::m_nPlatform == SF_GLES3)
-    {
-        strName + AddStr.Format("(E3)", nMaskGen);
-    }
-    // Confetti Nicholas Baldwin: adding metal shader language support
-    else
-    if (CParserBin::m_nPlatform == SF_METAL)
-    {
-        strName + AddStr.Format("(MET)", nMaskGen);
-    }
+
+    strName += AddStr.Format( GetShaderLanguageResourceName() );
 
     CCryNameTSCRC Name = strName.c_str();
     CBaseResource* pBR = CBaseResource::GetResource(className, Name, false);
@@ -4241,7 +4263,11 @@ void CHWShader_D3D::SetTokenFlags(uint32 nToken)
         m_Flags |= HWSG_SUPPORTS_MULTILIGHTS;
         break;
     case eT__TT_TEXCOORD_MATRIX:
-    case eT__TT_TEXCOORD_GEN_OBJECT_LINEAR:
+    case eT__TT_TEXCOORD_GEN_OBJECT_LINEAR_DIFFUSE:
+    case eT__TT_TEXCOORD_GEN_OBJECT_LINEAR_EMITTANCE:
+    case eT__TT_TEXCOORD_GEN_OBJECT_LINEAR_EMITTANCE_MULT:
+    case eT__TT_TEXCOORD_GEN_OBJECT_LINEAR_DETAIL:
+    case eT__TT_TEXCOORD_GEN_OBJECT_LINEAR_CUSTOM:
         m_Flags |= HWSG_SUPPORTS_MODIF;
         break;
     case eT__VT_TYPE:
@@ -4374,8 +4400,10 @@ void CHWShader_D3D::mfConstructFX_Mask_RT(FXShaderToken* Table, TArray<uint32>* 
     }
     SShaderGen* pGen = gRenDev->m_cEF.m_pGlobalExt;
     
-    // Construct mask of all mask bits that are usable for this shader from precache entries. This mask is then ANDed with the property defines used in the shader
-    // See Runtime.ext file
+    // Construct mask of all mask bits that are usable for this shader from precache entries. This mask is then ANDed 
+    // with the property defines used in the shader, in other words, permutation flags prep for shader fetch will 
+    // be AND with these masks so that only acceptable / used permutations are being fetched.
+    // See Runtime.ext file for the flags bits themselves.
     uint64 allowedBits = 0;
     if (m_dwShaderType)
     {
@@ -4409,7 +4437,7 @@ void CHWShader_D3D::mfConstructFX_Mask_RT(FXShaderToken* Table, TArray<uint32>* 
     }
     else
     {
-        allowedBits = 0x7FFFFFFFFFFFFFFF;
+        allowedBits = 0xFFFFFFFFFFFFFFFF;
     }
     
     AZ_Assert(!pSHData->empty(), "Shader data is empty");
@@ -5210,6 +5238,10 @@ bool CHWShader_D3D::mfSetHS(int nFlags)
     s_pCurInstHS = pInst;
     if (!(nFlags & HWSF_PRECACHE))
     {
+#if defined(AZ_RESTRICTED_PLATFORM)
+#define AZ_RESTRICTED_SECTION D3DHWSHADER_CPP_SECTION_1
+#include AZ_RESTRICTED_FILE(D3DHWShader_cpp, AZ_RESTRICTED_PLATFORM)
+#endif
 
         mfBindHS(pInst->m_Handle.m_pShader, pInst->m_Handle.m_pShader->m_pHandle);
 
@@ -5266,6 +5298,10 @@ bool CHWShader_D3D::mfSetDS(int nFlags)
     s_pCurInstDS = pInst;
     if (!(nFlags & HWSF_PRECACHE))
     {
+#if defined(AZ_RESTRICTED_PLATFORM)
+#define AZ_RESTRICTED_SECTION D3DHWSHADER_CPP_SECTION_2
+#include AZ_RESTRICTED_FILE(D3DHWShader_cpp, AZ_RESTRICTED_PLATFORM)
+#endif
 
         mfBindDS(pInst->m_Handle.m_pShader, pInst->m_Handle.m_pShader->m_pHandle);
 
@@ -5410,3 +5446,4 @@ AZ::u32 CHWShader_D3D::SHWSInstance::GenerateVertexDeclarationCacheCRC(const AZ:
 
     return fetchShaderCRC;
 }
+

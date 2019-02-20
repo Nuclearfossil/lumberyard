@@ -30,7 +30,7 @@ def get_lymetrics_library_path():
     if platform.system() == "Windows":
         path = os.path.join(path, 'windows', 'intel64')
         for build in ['Release', 'Debug']:
-            for vs in ['vs2015', 'vs2013']:
+            for vs in ['vs2017', 'vs2015', 'vs2013']:
                 dll = os.path.join(path, vs, build, 'LyMetricsProducer_python.dll')
                 if os.path.exists(dll):
                     return dll
@@ -194,3 +194,14 @@ class MetricsContext(object):
 
     def add_attribute(self, key, value):
         self.__attributes.append((key, value))
+
+    def create_new_event_id(self, event_name):
+        if self.__dll is None:
+            return -1
+        return self._create_event(event_name)
+
+    def add_metric_to_event_by_id(self, metricId, attributeName, attributeValue):
+        self._add_metric(metricId, attributeName, ctypes.c_double(attributeValue))
+
+    def submit_event_by_id(self, metricId):
+        self._submit_event(metricId)

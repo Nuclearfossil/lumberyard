@@ -97,6 +97,7 @@ class CTrackViewSequence
     friend class CAbstractUndoAnimNodeTransaction;
     friend class CUndoAnimNodeReparent;
     friend class CUndoTrackObject;
+    friend class CUndoComponentEntityTrackObject;
     friend class CAbstractUndoSequenceTransaction;
 
 public:
@@ -276,6 +277,19 @@ public:
         }
     }
 
+    void SetExpanded(bool expanded) override
+    {
+        if (m_pAnimSequence)
+        {
+            m_pAnimSequence->SetExpanded(expanded);
+        }
+    }
+
+    bool GetExpanded() const override
+    {
+        return m_pAnimSequence ? m_pAnimSequence->GetExpanded() : true;
+    }
+
     // Called when the 'Record' button is pressed in the toolbar
     void SetRecording(bool enableRecording);
 
@@ -284,6 +298,11 @@ public:
     void OnEntityComponentPropertyChanged(AZ::ComponentId /*changedComponentId*/) override;
     /////////////////////////////////////////////////////////////////////////////////////////////////////
 
+    CTrackViewTrack* FindTrackById(unsigned int trackId);
+
+    // Helper function to find a sequence by entity id
+    static CTrackViewSequence* LookUpSequenceByEntityId(const AZ::EntityId& sequenceId);
+
 private:
     // These are used to avoid listener notification spam via CTrackViewSequenceNotificationContext.
     // For recursion there is a counter that increases on QueueListenerNotifications
@@ -291,7 +310,9 @@ private:
     // Only when the counter reaches 0 again SubmitPendingListenerNotifcations
     // will submit the notifications
     void QueueNotifications();
-    void SubmitPendingNotifcations();
+    // Used to cancel a previously queued notification.
+    void DequeueNotifications();
+    void SubmitPendingNotifcations(bool force = false);
 
     /////////////////////////////////////////////////////////////////////////
     // overrides for ITrackViewSequenceManagerListener
@@ -358,6 +379,15 @@ public:
         {
             m_pSequence->SubmitPendingNotifcations();
         }
+    }
+
+    void Cancel()
+    {
+        if (m_pSequence)
+        {
+            m_pSequence->DequeueNotifications();
+        }        
+        m_pSequence = nullptr;
     }
 
 private:

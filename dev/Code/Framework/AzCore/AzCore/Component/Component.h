@@ -24,6 +24,7 @@
 
 #include <AzCore/Memory/Memory.h>
 #include <AzCore/Memory/SystemAllocator.h> // Used as the allocator for most components.
+#include <AzCore/Outcome/Outcome.h>
 
 namespace AZ
 {
@@ -34,6 +35,7 @@ namespace AZ
     using ImmutableEntityVector = AZStd::vector<AZ::Entity const *>;
 
     using ComponentTypeList = AZStd::vector<Uuid>; ///< List of Component class type IDs.
+    using ComponentValidationResult = AZ::Outcome<void, AZStd::string>;
 
     /**
      * Base class for all components. 
@@ -97,11 +99,25 @@ namespace AZ
         ComponentId GetId() const       { return m_id; }
 
         /**
+        * Returns the type ID
+        * Can be overridden for components that wrap other components, to provide a punch through
+        * to the wrapped component's ID.
+        * @return The type ID of the component.
+        */
+        virtual const TypeId& GetUnderlyingComponentType() const { return RTTI_GetType(); }
+
+        /**
          * Sets the component ID.
          * This function is for internal use only.
          * @param id The ID to assign to the component.
          */
         void SetId(const ComponentId& id)   { m_id = id; }
+
+        /**
+        * Override to conduct per-component or per-slice validation logic during slice asset processing.
+        * @param sliceEntities All entities that belong to the slice that the entity with this component is on.
+        */
+        virtual ComponentValidationResult ValidateComponentRequirements(const ImmutableEntityVector& /*sliceEntities*/) const { return AZ::Success(); }
 
         /**
          * Set the component's configuration.
@@ -121,12 +137,6 @@ namespace AZ
          * For example, use a TransformConfig with a TransformComponent.
          */
         bool GetConfiguration(AZ::ComponentConfig& outConfig) const;
-
-        /**
-        * Override to conduct per-component or per-slice validation logic during slice asset processing.
-        * @param sliceEntities All entities that belong to the slice that the entity with this component is on.
-        */
-        virtual bool ValidateComponentRequirements(const ImmutableEntityVector& /*sliceEntities*/) const { return true; }
 
     protected:
         /**
@@ -292,9 +302,8 @@ namespace AZ
         /**
          * The type of array that components use to specify provided, required, dependent,
          * and incompatible services.
-         * This is a fixed vector because we are typically using the array on the stack.
          */
-        typedef AZStd::fixed_vector<ComponentServiceType, 32> DependencyArrayType;
+        typedef AZStd::vector<ComponentServiceType> DependencyArrayType;
 
          /**
           * Creates an instance of the component.
@@ -411,6 +420,11 @@ namespace AZ
         ComponentDescriptorHelper()
         {
             BusConnect(AzTypeInfo<ComponentClass>::Uuid());
+        }
+
+        ~ComponentDescriptorHelper()
+        {
+            BusDisconnect();
         }
 
         /**

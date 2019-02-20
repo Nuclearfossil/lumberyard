@@ -32,6 +32,49 @@
 
 #include <AzToolsFramework/Metrics/LyEditorMetricsBus.h>
 
+static const int s_invalidGuardActionId = -1;
+
+ActionManagerExecutionGuard::ActionManagerExecutionGuard(ActionManager* actionManager, QAction* action)
+    : m_actionManager(actionManager)
+    , m_actionId(s_invalidGuardActionId)
+    , m_canExecute(true)
+{
+    // both actionManager and action can be nullptr, and this is totally valid. The lambas using this might be out of scope and
+    // their QPointers may have been cleared
+    if (actionManager && action)
+    {
+        m_actionId = action->data().toInt();
+        m_canExecute = actionManager->InsertActionExecuting(m_actionId);
+    }
+}
+
+ActionManagerExecutionGuard::ActionManagerExecutionGuard(ActionManager* actionManager, int actionId)
+    : m_actionManager(actionManager)
+    , m_actionId(actionId)
+    , m_canExecute(true)
+{
+    // both actionManager and action can be nullptr, and this is totally valid. The lambas using this might be out of scope and
+    // their QPointers may have been cleared
+    if (actionManager)
+    {
+        m_canExecute = actionManager->InsertActionExecuting(m_actionId);
+    }
+}
+
+ActionManagerExecutionGuard::~ActionManagerExecutionGuard()
+{
+    // Only bother removing the action if it successfully inserted, indicated by m_canExecute.
+    // If during the insert, it was found that the action was already present, then there
+    // is no need to remove it, and doing so might cause problems because any it implies
+    // that something has already executed the action higher up the callstack and we don't
+    // want to remove the id so that future action triggers within the same callstack are prevented
+    // from executing.
+    if (m_canExecute && m_actionManager && (m_actionId != s_invalidGuardActionId))
+    {
+        m_actionManager->RemoveActionExecuting(m_actionId);
+    }
+}
+
 PatchedAction::PatchedAction(const QString& name, QObject* parent)
     : QAction(name, parent)
 {
@@ -70,6 +113,15 @@ bool PatchedAction::event(QEvent* ev)
             }
             else if (associatedWindow && focusWindow)
             {
+                /**
+                 * But do allow if the focused window is actually a floating dock widget.
+                 * For example, If Entity Outliner is floating, the gizmos (key 1, 2, 3 4) should still work.
+                 *
+                 * FIXME: But then why are those main toolbar actions using Qt::WindowShortcut instead of Qt::ApplicationShortcut ?
+                 * This block goes against what the original PatchedAction fixed.
+                 * Consider either removing it and using regular QActions, or using Qt::ApplicationShortcut
+                 * See also LY-35177
+                 */
                 QString focusWindowName = focusWindow->objectName();
                 if (focusWindowName.isEmpty())
                 {
@@ -85,7 +137,8 @@ bool PatchedAction::event(QEvent* ev)
             }
         }
 
-        // Bug detected. Consume the event instead of processing it.
+        // Bug detected: Qt is propagating a shortcut with context Qt::WindowShortcut outside of window boundaries
+        // Consume the event instead of processing it.
         qDebug() << "Discarding buggy shortcut";
         return true;
     }
@@ -320,6 +373,27 @@ bool ActionManager::eventFilter(QObject* watched, QEvent* event)
     return false;
 }
 
+bool ActionManager::InsertActionExecuting(int id)
+{
+    // If the action handler puts up a modal dialog, the event queue will be pumped
+    // and double clicks on menu items will go through, in some cases.
+    // This is to guard against that.
+    if (m_executingIds.find(id) != m_executingIds.end())
+    {
+        return false;
+    }
+
+    m_executingIds.insert(id);
+    return true;
+}
+
+bool ActionManager::RemoveActionExecuting(int id)
+{
+    bool idWasInList = m_executingIds.remove(id);
+    Q_ASSERT(idWasInList);
+    return idWasInList;
+}
+
 
 void ActionManager::AddAction(int id, QAction* action)
 {
@@ -398,8 +472,13 @@ void ActionManager::ActionTriggered(int id)
     {
         if (m_actionHandlers.contains(id))
         {
-            SendMetricsEvent(id);
-            m_actionHandlers[id]();
+            ActionManagerExecutionGuard guard(this, id);
+
+            if (guard.CanExecute())
+            {
+                SendMetricsEvent(id);
+                m_actionHandlers[id]();
+            }
         }
     }
 }

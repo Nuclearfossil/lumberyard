@@ -834,7 +834,7 @@ namespace Audio
         // See Also:
         //		DeleteAudioListenerObjectData
         ///////////////////////////////////////////////////////////////////////////////////////////////
-        virtual IATLListenerData* NewDefaultAudioListenerObjectData() = 0;
+        virtual IATLListenerData* NewDefaultAudioListenerObjectData(const TATLIDType nObjectID) = 0;
 
         ///////////////////////////////////////////////////////////////////////////////////////////////
         // <title NewAudioListenerObjectData>
@@ -852,7 +852,7 @@ namespace Audio
         // See Also:
         //		DeleteAudioListenerObjectData
         ///////////////////////////////////////////////////////////////////////////////////////////////
-        virtual IATLListenerData* NewAudioListenerObjectData(const uint nIndex) = 0;
+        virtual IATLListenerData* NewAudioListenerObjectData(const TATLIDType nObjectID) = 0;
 
         ///////////////////////////////////////////////////////////////////////////////////////////////
         // <title DeleteAudioListenerObjectData>
@@ -957,6 +957,18 @@ namespace Audio
         //		oMemoryInfo - a reference to an instance of SAudioImplMemoryInfo.
         ///////////////////////////////////////////////////////////////////////////////////////////////
         virtual void GetMemoryInfo(SAudioImplMemoryInfo& oMemoryInfo) const = 0;
+
+        ///////////////////////////////////////////////////////////////////////////////////////////////
+        // <title GetMemoryPoolInfo>
+        // Summary:
+        //      Retrieve a vector of memory pool infos.  The memory pools are defined and managed by
+        //      the audio middleware.
+        // Arguments:
+        //      None
+        // See Also:
+        //      GetMemoryInfo
+        ///////////////////////////////////////////////////////////////////////////////////////////////
+        virtual AZStd::vector<AudioImplMemoryPoolInfo> GetMemoryPoolInfo() = 0;
 
         ///////////////////////////////////////////////////////////////////////////////////////////////
         // <title CreateAudioSource>

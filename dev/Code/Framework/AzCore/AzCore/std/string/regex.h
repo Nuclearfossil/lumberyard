@@ -9,8 +9,7 @@
 * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 *
 */
-#ifndef AZSTD_REGEX_H
-#define AZSTD_REGEX_H
+#pragma once
 
 #include <AzCore/std/base.h>
 #include <AzCore/std/algorithm.h>
@@ -22,7 +21,9 @@
 #include <AzCore/std/containers/vector.h>
 #include <AzCore/Memory/SystemAllocator.h>
 
-#if    defined(AZ_PLATFORM_LINUX) || defined(AZ_PLATFORM_ANDROID) || defined(AZ_PLATFORM_APPLE)
+#if defined(AZ_RESTRICTED_PLATFORM)
+#include AZ_RESTRICTED_FILE(regex_h, AZ_RESTRICTED_PLATFORM)
+#elif  defined(AZ_PLATFORM_LINUX) || defined(AZ_PLATFORM_ANDROID) || defined(AZ_PLATFORM_APPLE)
 #   include <limits.h>
 #   include <limits>
 #endif
@@ -1346,6 +1347,8 @@ namespace AZStd
         typedef AZ_REGEX_DIFFT (ForwardIterator) DiffType;
 
         Builder(const RegExTraits& traits, regex_constants::syntax_option_type);
+        ~Builder();
+
         bool BeginExpression() const;
         void SetLong();
         void DiscardPattern();
@@ -2626,6 +2629,16 @@ namespace AZStd
         , m_bitmapArrayMax(flags & regex_constants::collate ? 0 : BITMAP_ARRAY_THRESHOLD)
     {
     }
+
+    template<class ForwardIterator, class Element, class RegExTraits>
+    inline Builder<ForwardIterator, Element, RegExTraits>::~Builder()
+    {
+        if (m_root && m_root->m_refs == 0)
+        {
+            DestroyNode(m_root);
+        }
+    }
+
 
     template<class ForwardIterator, class Element, class RegExTraits>
     inline void Builder<ForwardIterator, Element, RegExTraits>::SetLong()
@@ -4775,6 +4788,3 @@ namespace AZStd
 /*
  * Copyright (c) 1992-2012 by P.J. Plauger.  ALL RIGHTS RESERVED.
  * Consult your license regarding permissions and restrictions. V6.00:0009 */
-
-#endif // #ifndef AZSTD_REGEX_H
-#pragma once

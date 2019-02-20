@@ -166,6 +166,7 @@ namespace Water
     {
         m_volumeId = static_cast<AZ::u64>(m_entityId);
         m_waterRenderNode = static_cast<IWaterVolumeRenderNode*>(gEnv->p3DEngine->CreateRenderNode(eERType_WaterVolume));
+        m_waterRenderNode->m_hasToBeSerialised = false;
 
         //Load material
         _smart_ptr<IMaterial> material = nullptr;
@@ -467,6 +468,7 @@ namespace Water
                     rendFlags &= ~ERF_HIDDEN;
                 }
 
+                rendFlags |= ERF_COMPONENT_ENTITY;
                 m_waterRenderNode->SetRndFlags(rendFlags);
             }
         }
@@ -598,6 +600,7 @@ namespace Water
         physicalAreaParams.waveSim.waveSpeed = m_waveSpeed;
         physicalAreaParams.waveSim.dampingCenter = m_waveDampening;
         physicalAreaParams.waveSim.timeStep = m_waveTimestep;
+        physicalAreaParams.waveSim.simDepth = m_waveDepthCellSize;
         physicalAreaParams.waveSim.heightLimit = m_waveHeightLimit;
         physicalAreaParams.waveSim.minVel = m_waveSleepThreshold;
         physicalAreaParams.waveSim.resistance = m_waveForce;
@@ -664,27 +667,27 @@ namespace Water
 
         m_waterDepth = dimensions.GetZ();
     }
+
     void WaterVolumeCommon::HandleCylinderVerts()
     {
         LmbrCentral::CylinderShapeConfig cylinderConfig;
         LmbrCentral::CylinderShapeComponentRequestsBus::EventResult(cylinderConfig, m_entityId, &LmbrCentral::CylinderShapeComponentRequestsBus::Events::GetCylinderConfiguration);
 
-        m_waterDepth = cylinderConfig.GetHeight();
-        float halfHeight = m_waterDepth * 0.5f;
+        m_waterDepth = cylinderConfig.m_height;
+        const float halfHeight = m_waterDepth * 0.5f;
 
-        float radius = cylinderConfig.GetRadius();
-        AZ::u32 radiusInt = static_cast<AZ::u32>(ceilf(cylinderConfig.GetRadius()));
-        AZ::u32 segments = (radiusInt * 4) + 16;
+        const float radius = cylinderConfig.m_radius;
+        const AZ::u32 radiusInt = static_cast<AZ::u32>(ceilf(cylinderConfig.m_radius));
+        const AZ::u32 segments = (radiusInt * 4) + 16;
 
         m_azVerts.resize(segments);
-
         for (AZ::u32 i = 0; i < segments; ++i)
         {
-            float radians = i * (AZ::Constants::TwoPi / static_cast<float>(segments));
+            const float radians = i * (AZ::Constants::TwoPi / static_cast<float>(segments));
 
-            float x = radius * cosf(radians);
-            float y = radius * sinf(radians);
-            float z = halfHeight;
+            const float x = radius * cosf(radians);
+            const float y = radius * sinf(radians);
+            const float z = halfHeight;
 
             m_azVerts[i] = AZ::Vector3(x, y, z);
         }

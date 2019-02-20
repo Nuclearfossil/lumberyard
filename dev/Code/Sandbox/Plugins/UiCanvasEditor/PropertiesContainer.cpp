@@ -57,14 +57,14 @@ void PropertiesContainer::BuildSharedComponentList(ComponentTypeMap& sharedCompo
     {
         AZ::SliceComponent::SliceInstanceAddress address;
         EBUS_EVENT_ID_RESULT(address, entitiesShown[0], AzFramework::EntityIdContextQueryBus, GetOwningSlice);
-        if (address.first)
+        if (address.IsValid())
         {
             AZ::SliceComponent::EntityAncestorList ancestors;
-            address.first->GetInstanceEntityAncestry(entitiesShown[0], ancestors, 1);
+            address.GetReference()->GetInstanceEntityAncestry(entitiesShown[0], ancestors, 1);
 
             if (!ancestors.empty())
             {
-                m_compareToEntity = AzToolsFramework::SliceUtilities::CloneSliceEntityForComparison(*ancestors[0].m_entity, *address.second, *m_serializeContext);
+                m_compareToEntity = AzToolsFramework::SliceUtilities::CloneSliceEntityForComparison(*ancestors[0].m_entity, *address.GetInstance(), *m_serializeContext);
             }
         }
     }
@@ -292,15 +292,16 @@ AzToolsFramework::ReflectedPropertyEditor* PropertiesContainer::CreatePropertyEd
     m_rowLayout->addWidget(editor);
     editor->hide();
 
-    editor->Setup(m_serializeContext, m_propertiesWidget, true, 150);
+    const int propertyLabelWidth = 150;
+    editor->Setup(m_serializeContext, m_propertiesWidget, true, propertyLabelWidth);
     editor->SetSavedStateKey(AZ_CRC("UiCanvasEditor_PropertyEditor", 0xc402ebcc));
+    editor->SetLabelAutoResizeMinimumWidth(propertyLabelWidth);
+    editor->SetAutoResizeLabels(true);
 
     QObject::connect(editor,
         &AzToolsFramework::ReflectedPropertyEditor::OnExpansionContractionDone,
-        [ this ]()
-        {
-            SetHeightOfContentRect();
-        });
+        this,
+        &PropertiesContainer::SetHeightOfContentRect);
 
     return editor;
 }
@@ -444,7 +445,7 @@ void PropertiesContainer::SelectionChanged(HierarchyItemRawPtrList* items)
     m_selectedEntities.clear();
     if (items)
     {
-        for (auto i : * items)
+        for (auto i : *items)
         {
             m_selectedEntities.push_back(i->GetEntityId());
         }
@@ -507,7 +508,7 @@ void PropertiesContainer::RequestPropertyContextMenu(AzToolsFramework::InstanceD
     }
 }
 
-void PropertiesContainer::SetSelectedEntityDisplayNameWidget(QLabel * selectedEntityDisplayNameWidget)
+void PropertiesContainer::SetSelectedEntityDisplayNameWidget(QLabel* selectedEntityDisplayNameWidget)
 {
     m_selectedEntityDisplayNameWidget = selectedEntityDisplayNameWidget;
 }

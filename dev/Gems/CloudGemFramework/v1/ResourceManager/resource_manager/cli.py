@@ -55,12 +55,12 @@ def main():
         __bootstrap_context(context)
 
         # Deprecated in 1.9. TODO: remove.
-        context.hooks.call_module_handlers('cli-plugin-code/resource_commands.py', 'add_cli_view_commands', 
-            args=[context.view], 
+        context.hooks.call_module_handlers('cli-plugin-code/resource_commands.py', 'add_cli_view_commands',
+            args=[context.view],
             deprecated=True)
 
-        context.hooks.call_module_handlers('resource-manager-code/command.py', 'add_cli_view_commands', 
-            kwargs={ 
+        context.hooks.call_module_handlers('resource-manager-code/command.py', 'add_cli_view_commands',
+            kwargs={
                 'view_context': context.view
             }
         )
@@ -97,18 +97,18 @@ def main():
 
             context.initialize(args)
 
-            if args.func != project.update_framework_version:                
+            if args.func != project.update_framework_version:
                 context.config.verify_framework_version()
 
             # Using context_func instead of func to specify the cli command handler
-            # causes the function to be called with only args using **kwargs. 
+            # causes the function to be called with only args using **kwargs.
             #
-            # It is expected that the value is a function on an object instance that 
+            # It is expected that the value is a function on an object instance that
             # already access to context, so that argument is not passed. Python takes
             # care of passing self to the function when we call it.
             #
-            # Using **kwargs makes the function easier to call from other code. Use 
-            # dest= in the add_option call to change the name of the parameter passed 
+            # Using **kwargs makes the function easier to call from other code. Use
+            # dest= in the add_option call to change the name of the parameter passed
             # to the handler if you don't like the default.
             #
             # See the gem module for examples.
@@ -178,19 +178,20 @@ COMMON_ARG_KEYS = set([
     'context_func',
 
     # these come from __add_common_args
-    'aws_access_key', 
-    'aws_secret_key', 
-    'profile', 
-    'assume_role', 
+    'aws_access_key',
+    'aws_secret_key',
+    'profile',
+    'assume_role',
 
     # these come from __add_bootstrap_args
-    'root_directory', 
+    'root_directory',
     'game_directory',
     'aws_directory',
     'user_directory',
     'verbose',
     'no_prompt',
-    'region_override'
+    'region_override',
+    'only_cloud_gems'
     ])
 
 
@@ -213,6 +214,7 @@ def __add_bootstrap_args(parser):
     parser.add_argument('--verbose', action='store_true', help='Show additional output when executing commands.')
     parser.add_argument('--no-prompt', action='store_true', help='Special flag set automatically when entering from tests - calls which would raise an option for user input will instead raise an error')
     parser.add_argument('--region-override', help='An override to manually indicate which region to use in your local-project-setting.json other than the default.')
+    parser.add_argument('--only-cloud-gems', nargs="+", help='Only modify the following cloud gems.')
 
 
 def __add_project_stack_commands(stack_subparser):
@@ -232,13 +234,11 @@ def __add_project_stack_commands(stack_subparser):
     subparser.add_argument('--confirm-aws-usage', '-C', action='store_true', help='Confirms that you know this command will create AWS resources for which you may be charged and that it may perform actions that can affect permissions in your AWS account.')
     subparser.add_argument('--confirm-resource-deletion', '-D', action='store_true', help='Confirms that you know this command will permanently delete resources.')
     subparser.add_argument('--confirm-security-change', '-S', action='store_true', help='Confirms that you know this command will make security related changes.')
-    subparser.add_argument('--enable-capability', nargs='+', metavar='CAPABILITY', help='A list of capabilities that you must specify before AWS CloudFormation can create or update certain stacks. Some stack templates might include resources that can affect permissions in your AWS account. For those stacks, you must explicitly acknowledge their capabilities by specifying this parameter. Possible values include: CAPABILITY_IAM.')
     __add_common_args(subparser)
     subparser.set_defaults(func=project.update_stack)
 
     subparser = subparsers.add_parser('delete', help='Deletes the AWS resources used by Lumberyard project. This command will not delete projects with deployments.')
     subparser.add_argument('--confirm-resource-deletion', '-D', action='store_true', help='Confirms that you know this command will permanently delete resources.')
-    subparser.add_argument('--enable-capability', nargs='+', metavar='CAPABILITY', help='A list of capabilities that you must specify before AWS CloudFormation can create or update certain stacks. Some stack templates might include resources that can affect permissions in your AWS account. For those stacks, you must explicitly acknowledge their capabilities by specifying this parameter. Possible values include: CAPABILITY_IAM.')
     __add_common_args(subparser)
     subparser.set_defaults(func=project.delete_stack)
 
@@ -258,26 +258,17 @@ def __add_project_stack_commands(stack_subparser):
     subparser.add_argument('--confirm-aws-usage', '-C', action='store_true', help='Confirms that you know this command will create AWS resources for which you may be charged and that it may perform actions that can affect permissions in your AWS account.')
     subparser.add_argument('--confirm-resource-deletion', '-D', action='store_true', help='Confirms that you know this command will permanently delete resources.')
     subparser.add_argument('--confirm-security-change', '-S', action='store_true', help='Confirms that you know this command will make security related changes.')
-    subparser.add_argument('--enable-capability', nargs='+', metavar='CAPABILITY', help='A list of capabilities that you must specify before AWS CloudFormation can create or update certain stacks. Some stack templates might include resources that can affect permissions in your AWS account. For those stacks, you must explicitly acknowledge their capabilities by specifying this parameter. Possible values include: CAPABILITY_IAM.')
     __add_common_args(subparser)
     subparser.set_defaults(func=project.update_framework_version)
+
+    subparser = subparsers.add_parser('clean-custom-resources', help='Deletes unreferenced versions of custom resource lambdas.')
+    __add_common_args(subparser)
+    subparser.set_defaults(func=project.clean_custom_resource_handlers)
 
 
 def __add_resource_group_commands(group_subparser):
     group_subparser.register('action', 'parsers', AliasedSubParsersAction)
     subparsers = group_subparser.add_subparsers(dest='subparser_name', metavar='COMMAND')
-
-    subparser = subparsers.add_parser('add') # deprecated (no help= to hide)
-    subparser.add_argument('--resource-group', '-r', required=True, metavar='GROUP', help='The name of the resource group.')
-    subparser.add_argument('--include-example-resources', action='store_true', help='Include "Hello World" example resources.')
-    subparser.add_argument('--gem', const='', default=None, action='store', nargs='?', metavar='GEM-PATH', help='Looks for resource group definition at Gems\GROUP\AWS or GEM-PATH\AWS if the optional GEM-PATH value is provided.')
-    __add_common_args(subparser)
-    subparser.set_defaults(func=resource_group.add)
-
-    subparser = subparsers.add_parser('remove') # deprecated (no help= to hide)
-    subparser.add_argument('--resource-group', '-r', required=True, metavar='GROUP', help='The name of the resource group to remove.')
-    __add_common_args(subparser)
-    subparser.set_defaults(func=resource_group.remove)
 
     subparser = subparsers.add_parser('disable', help='Disable a resource group. Disabled resource groups are not be included in deployments.')
     subparser.add_argument('--resource-group', '-r', required=True, metavar='GROUP', help='The name of the resource group.')
@@ -330,13 +321,15 @@ def __add_deployment_commands(deployment_subparser):
     subparser.add_argument('--confirm-security-change', '-S', action='store_true', help='Confirms that you know this command will modify AWS security configuration.')
     subparser.add_argument('--make-project-default', action='store_true', help='After creation, the deployment will be set as the default deployment for the development builds of the project')
     subparser.add_argument('--make-release-deployment', action='store_true', help='After creation, the deployment will be set as the deployment for the release builds of the project')
+    subparser.add_argument('--tags', nargs='+', required=False, help='Deployment tags, to allow per-deployment overrides')
+    subparser.add_argument('--parallel', action='store_true', help='Deploy resource groups in parallel instead of one-at-a-time. (More likely to encounter resource limits.)')
     __add_common_args(subparser)
     subparser.set_defaults(func=deployment.create_stack)
 
     subparser = subparsers.add_parser('delete', help='Delete a complete and independent copy of all the resources needed by the Lumberyard project.')
     subparser.add_argument('--deployment', '-d', required=True, metavar='DEPLOYMENT', help='The name of the deployment to delete.')
-    subparser.add_argument('--enable-capability', nargs='+', metavar='CAPABILITY', help='A list of capabilities that you must specify before AWS CloudFormation can create or update certain stacks. Some stack templates might include resources that can affect permissions in your AWS account. For those stacks, you must explicitly acknowledge their capabilities by specifying this parameter. Possible values include: CAPABILITY_IAM.')
     subparser.add_argument('--confirm-resource-deletion', '-D', action='store_true', help='Confirms that you know this command will permanently delete resources.')
+    subparser.add_argument('--parallel', action='store_true', help='Delete resource groups in parallel instead of one-at-a-time. (More likely to encounter resource limits.)')
     __add_common_args(subparser)
     subparser.set_defaults(func=deployment.delete_stack)
 
@@ -382,6 +375,7 @@ def __add_deployment_commands(deployment_subparser):
     subparser.add_argument('--confirm-aws-usage', '-C', action='store_true', help='Confirms that you know this command will create AWS resources for which you may be charged and that it may perform actions that can affect permissions in your AWS account.')
     subparser.add_argument('--confirm-resource-deletion', '-D', action='store_true', help='Confirms that you know this command will permanently delete resources.')
     subparser.add_argument('--confirm-security-change', '-S', action='store_true', help='Confirms that you know this command will make security changes.')
+    subparser.add_argument('--parallel', action='store_true', help='Update resource groups in parallel instead of one-at-a-time. (More likely to encounter resource limits.)')
     __add_common_args(subparser)
     subparser.set_defaults(func=deployment.upload_resources)
 
@@ -392,6 +386,15 @@ def __add_deployment_commands(deployment_subparser):
     subparser.add_argument('--confirm-aws-usage', '-C', action='store_true', help='Confirms that you know this command will create AWS resources for which you may be charged and that it may perform actions that can affect permissions in your AWS account.')
     __add_common_args(subparser)
     subparser.set_defaults(func=deployment.update_access_stack)
+
+    subparser = subparsers.add_parser('tags', help='updates a deployments tags, which are used to provide resource-group overrides to a deployment')
+    subparser.add_argument('--deployment', '-d', metavar='DEPLOYMENT', required=False, help='The name of the deployment whos tags will be updated')
+    subparser.add_argument('--add', nargs='+', required=False, help='The tags to add to the deployment')
+    subparser.add_argument('--delete', nargs='+', required=False, help='The tags to delete from the deployment')
+    subparser.add_argument('--clear', action='store_true', required=False, help='Clear all tags for the deployment')
+    subparser.add_argument('--list', action='store_true', required=False, help='List all tags on a deployment')
+    subparser.set_defaults(func=deployment.tags)
+
 
 
 def __add_profile_commands(profile_subparser):
@@ -523,6 +526,7 @@ def __add_mappings_commands(mappings_subparser):
     group = subparser.add_mutually_exclusive_group()
     group.add_argument('--release', required=False, action='store_true', help='Causes the release mappings to be updated. By default the mappings used during development are updated.')
     group.add_argument('--deployment', '-d', metavar='DEPLOYMENT', required=False, help='Updates the launcher mappings to use the selected deployment')
+    subparser.add_argument('--ignore-cache', required=False, action='store_true', help="Ignores the cached mappings stored in the s3 configuration bucket, forcing a rebuild")
     __add_common_args(subparser)
     subparser.set_defaults(func=mappings.force_update)
 
@@ -582,7 +586,6 @@ def __add_deprecated_commands(context, subparsers):
     subparser = subparsers.add_parser('create-project-stack')
     subparser.add_argument('--stack-name', help='The name used for the project stack. The default is the name of the {game} directory.')
     subparser.add_argument('--confirm-aws-usage', '-C', action='store_true', help='Confirms that you know this command will create AWS resources for which you may be charged and that it may perform actions that can affect permissions in your AWS account.')
-    subparser.add_argument('--enable-capability', nargs='+', metavar='CAPABILITY', help='A list of capabilities that you must specify before AWS CloudFormation can create or update certain stacks. Some stack templates might include resources that can affect permissions in your AWS account. For those stacks, you must explicitly acknowledge their capabilities by specifying this parameter. Possible values include: CAPABILITY_IAM.')
     subparser.add_argument('--files-only', action='store_true', help='Initializes the {game}\AWS directory and exit. If this option is given the project stack is not created. If the directory already exists and contains any files, no new files are created.')
     subparser.add_argument('--region', required=True, help='The AWS region where the project stack will be located.')
     subparser.add_argument('--confirm-security-change', '-S', action='store_true', help='Confirms that you know this command will make security changes.')
@@ -593,13 +596,11 @@ def __add_deprecated_commands(context, subparsers):
     subparser.add_argument('--confirm-aws-usage', '-C', action='store_true', help='Confirms that you know this command will create AWS resources for which you may be charged and that it may perform actions that can affect permissions in your AWS account.')
     subparser.add_argument('--confirm-resource-deletion', '-D', action='store_true', help='Confirms that you know this command will permanently delete resources.')
     subparser.add_argument('--confirm-security-change', '-S', action='store_true', help='Confirms that you know this command will make security related changes.')
-    subparser.add_argument('--enable-capability', nargs='+', metavar='CAPABILITY', help='A list of capabilities that you must specify before AWS CloudFormation can create or update certain stacks. Some stack templates might include resources that can affect permissions in your AWS account. For those stacks, you must explicitly acknowledge their capabilities by specifying this parameter. Possible values include: CAPABILITY_IAM.')
     __add_common_args(subparser)
     subparser.set_defaults(func=project.update_stack)
 
     subparser = subparsers.add_parser('delete-project-stack')
     subparser.add_argument('--confirm-resource-deletion', '-D', action='store_true', help='Confirms that you know this command will permanently delete resources.')
-    subparser.add_argument('--enable-capability', nargs='+', metavar='CAPABILITY', help='A list of capabilities that you must specify before AWS CloudFormation can create or update certain stacks. Some stack templates might include resources that can affect permissions in your AWS account. For those stacks, you must explicitly acknowledge their capabilities by specifying this parameter. Possible values include: CAPABILITY_IAM.')
     __add_common_args(subparser)
     subparser.set_defaults(func=project.delete_stack)
 
@@ -648,24 +649,13 @@ def __add_deprecated_commands(context, subparsers):
     group = subparser.add_mutually_exclusive_group()
     group.add_argument('--release', required=False, action='store_true', help='Causes the release mappings to be updated. By default the mappings used during development are updated.')
     group.add_argument('--deployment', '-d', metavar='DEPLOYMENT', required=False, help='Updates the launcher mappings to use the selected deployment')
+    subparser.add_argument('--ignore-cache', required=False, action='store_true', help="Ignores the cached mappings stored in the s3 configuration bucket, forcing a rebuild")
     __add_common_args(subparser)
     subparser.set_defaults(func=mappings.force_update)
 
     subparser = subparsers.add_parser('list-mappings')
     __add_common_args(subparser)
     subparser.set_defaults(func=mappings.list)
-
-    subparser = subparsers.add_parser('add-resource-group')
-    subparser.add_argument('--resource-group', '-r', required=True, metavar='GROUP', help='The name of the resource group.')
-    subparser.add_argument('--include-example-resources', action='store_true', help='Include "Hello World" example resources.')
-    subparser.add_argument('--gem', const='', default=None, action='store', nargs='?', metavar='GEM-PATH', help='Looks for resource group definition at Gems\GROUP\AWS or GEM-PATH\AWS if the optional GEM-PATH value is provided.')
-    __add_common_args(subparser)
-    subparser.set_defaults(func=resource_group.add)
-
-    subparser = subparsers.add_parser('remove-resource-group')
-    subparser.add_argument('--resource-group', '-r', required=True, metavar='GROUP', help='The name of the resource group to remove.')
-    __add_common_args(subparser)
-    subparser.set_defaults(func=resource_group.remove)
 
     subparser = subparsers.add_parser('list-resource-groups')
     subparser.add_argument('--deployment', '-d', metavar='DEPLOYMENT', help='The name of the deployment used when determining the resource group status. If not specified, the default deployment is used.')
@@ -676,7 +666,6 @@ def __add_deprecated_commands(context, subparsers):
     subparser.add_argument('--deployment', '-d', required=True, metavar='DEPLOYMENT', help='The name of the deployment to add.')
     subparser.add_argument('--stack-name', help='The name used for the deployment stack. The default name is "ProjectStackName-DeploymentName".')
     subparser.add_argument('--confirm-aws-usage', '-C', action='store_true', help='Confirms that you know this command will create AWS resources for which you may be charged and that it may perform actions that can affect permissions in your AWS account.')
-    subparser.add_argument('--enable-capability', nargs='+', metavar='CAPABILITY', help='A list of capabilities that you must specify before AWS CloudFormation can create or update certain stacks. Some stack templates might include resources that can affect permissions in your AWS account. For those stacks, you must explicitly acknowledge their capabilities by specifying this parameter. Possible values include: CAPABILITY_IAM.')
     subparser.add_argument('--make-project-default', action='store_true', help='After creation, the deployment will be set as the default deployment for the development builds of the project')
     subparser.add_argument('--make-release-deployment', action='store_true', help='After creation, the deployment will be set as the deployment for the release builds of the project')
     subparser.add_argument('--confirm-security-change', '-S', action='store_true', help='Confirms that you know this command will make security changes.')
@@ -685,7 +674,6 @@ def __add_deprecated_commands(context, subparsers):
 
     subparser = subparsers.add_parser('delete-deployment')
     subparser.add_argument('--deployment', '-d', required=True, metavar='DEPLOYMENT', help='The name of the deployment to delete.')
-    subparser.add_argument('--enable-capability', nargs='+', metavar='CAPABILITY', help='A list of capabilities that you must specify before AWS CloudFormation can create or update certain stacks. Some stack templates might include resources that can affect permissions in your AWS account. For those stacks, you must explicitly acknowledge their capabilities by specifying this parameter. Possible values include: CAPABILITY_IAM.')
     subparser.add_argument('--confirm-resource-deletion', '-D', action='store_true', help='Confirms that you know this command will permanently delete resources.')
     __add_common_args(subparser)
     subparser.set_defaults(func=deployment.delete_stack)
@@ -828,7 +816,7 @@ def __add_built_in_commands(context, subparsers):
     __add_profile_commands(subparser)
 
     # mappings commands
-    subparser = subparsers.add_parser('mappings', help='Show or update the logical to phisical resource name mappings')
+    subparser = subparsers.add_parser('mappings', help='Show or update the logical to physical resource name mappings')
     __add_mappings_commands(subparser)
 
     # login provider commands
@@ -856,14 +844,14 @@ def __add_built_in_commands(context, subparsers):
 def __add_hook_module_commands(context, subparsers):
 
     # Deprecated in 1.9. TODO: remove.
-    context.hooks.call_module_handlers('cli-plugin-code/resource_commands.py','add_parser_commands', 
-        args=[subparsers, __add_common_args], 
+    context.hooks.call_module_handlers('cli-plugin-code/resource_commands.py','add_parser_commands',
+        args=[subparsers, __add_common_args],
         deprecated=True
     )
 
-    context.hooks.call_module_handlers('resource-manager-code/command.py','add_cli_commands', 
+    context.hooks.call_module_handlers('resource-manager-code/command.py','add_cli_commands',
         kwargs={
-            'subparsers': subparsers, 
+            'subparsers': subparsers,
             'add_common_args': __add_common_args
         }
     )

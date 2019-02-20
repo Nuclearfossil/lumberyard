@@ -11,10 +11,10 @@
 */
 // Original file Copyright Crytek GMBH or its affiliates, used under license.
 
-#include "StdAfx.h"
+#include "stdafx.h"
 #include "Cry_Color.h"
 #include "ConvertContext.h"
-#include "iconfig.h"
+#include "IConfig.h"
 #include "CharacterCompiler.h"
 #include "CGF/CGFSaver.h"
 #include "StatCGFPhysicalize.h"
@@ -98,12 +98,6 @@ ICompiler* CharacterCompiler::CreateCompiler()
     // convertor may as well just be the same object.
     ++m_refCount;
     return this;
-}
-
-//////////////////////////////////////////////////////////////////////////
-bool CharacterCompiler::SupportsMultithreading() const
-{
-    return false;
 }
 
 //////////////////////////////////////////////////////////////////////////

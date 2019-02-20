@@ -120,6 +120,37 @@ bool CTrackViewTrack::SnapTimeToNextKey(float& time) const
 }
 
 //////////////////////////////////////////////////////////////////////////
+void CTrackViewTrack::SetExpanded(bool expanded)
+{
+    if (m_pAnimTrack)
+    {
+        CTrackViewSequence* sequence = GetSequence();
+        if (nullptr != sequence)
+        {
+            if (GetExpanded() != expanded)
+            {
+                m_pAnimTrack->SetExpanded(expanded);
+
+                if (expanded)
+                {
+                    sequence->OnNodeChanged(this, ITrackViewSequenceListener::eNodeChangeType_Expanded);
+                }
+                else
+                {
+                    sequence->OnNodeChanged(this, ITrackViewSequenceListener::eNodeChangeType_Collapsed);
+                }
+            }
+        }
+    }
+}
+
+//////////////////////////////////////////////////////////////////////////
+bool CTrackViewTrack::GetExpanded() const
+{
+    return (m_pAnimTrack) ? m_pAnimTrack->GetExpanded() : false;
+}
+
+//////////////////////////////////////////////////////////////////////////
 CTrackViewKeyHandle CTrackViewTrack::GetPrevKey(const float time)
 {
     CTrackViewKeyHandle keyHandle;
@@ -516,14 +547,19 @@ void CTrackViewTrack::SelectKey(unsigned int keyIndex, bool bSelect)
 }
 
 //////////////////////////////////////////////////////////////////////////
-void CTrackViewTrack::SetKeyTime(const int index, const float time)
+void CTrackViewTrack::SetKeyTime(const int index, const float time, bool notifyListeners)
 {
     const float bOldTime = m_pAnimTrack->GetKeyTime(index);
 
     m_pAnimTrack->SetKeyTime(index, time);
 
-    if (bOldTime != time)
+    if (notifyListeners && (bOldTime != time))
     {
+        // The keys were just make invalid by the above SetKeyTime(), so sort them now
+        // to make sure they are ready to be used. Only do this when notifyListeners
+        // is set so client callers can batch up a bunch of SetKeyTime calls if desired.
+        m_pAnimTrack->SortKeys();
+
         m_pTrackAnimNode->GetSequence()->OnKeysChanged();
     }
 }
@@ -585,6 +621,26 @@ bool CTrackViewTrack::IsKeySelected(unsigned int keyIndex) const
     if (m_pAnimTrack)
     {
         return m_pAnimTrack->IsKeySelected(keyIndex);
+    }
+
+    return false;
+}
+
+//////////////////////////////////////////////////////////////////////////
+void CTrackViewTrack::SetSortMarkerKey(unsigned int keyIndex, bool enabled)
+{
+    if (m_pAnimTrack)
+    {
+        return m_pAnimTrack->SetSortMarkerKey(keyIndex, enabled);
+    }
+}
+
+//////////////////////////////////////////////////////////////////////////
+bool CTrackViewTrack::IsSortMarkerKey(unsigned int keyIndex) const
+{
+    if (m_pAnimTrack)
+    {
+        return m_pAnimTrack->IsSortMarkerKey(keyIndex);
     }
 
     return false;
@@ -764,16 +820,19 @@ void CTrackViewTrack::PasteKeys(XmlNodeRef xmlNode, const float timeOffset)
 {
 
     CTrackViewSequence* sequence = GetSequence();
+    AZ_Assert(sequence, "Expected sequence not to be null.");
 
     if (sequence->GetSequenceType() == SequenceType::Legacy)
-    {
-        m_pAnimTrack->SerializeSelection(xmlNode, true, true, timeOffset);
-    }
-    else
     {
         AZ_Assert(CUndo::IsRecording(), "Expected Undo Recording");
         CUndo::Record(new CUndoTrackObject(this, sequence));
         m_pAnimTrack->SerializeSelection(xmlNode, true, true, timeOffset);
         CUndo::Record(new CUndoAnimKeySelection(sequence));
+    }
+    else
+    {
+        AzToolsFramework::ScopedUndoBatch undoBatch("Paste Keys");
+        m_pAnimTrack->SerializeSelection(xmlNode, true, true, timeOffset);
+        undoBatch.MarkEntityDirty(sequence->GetSequenceComponentEntityId());
     }
 }

@@ -16,7 +16,7 @@
 #include <AzCore/base.h>
 #include <AzCore/Memory/SystemAllocator.h>
 #include <AzCore/RTTI/RTTI.h>
-#include <AzCore/Component/componentbus.h>
+#include <AzCore/Component/ComponentBus.h>
 #include <AzToolsFramework/Undo/UndoSystem.h>
 
 #pragma once
@@ -31,7 +31,7 @@ namespace AzToolsFramework
     {
     public:
         AZ_CLASS_ALLOCATOR(SelectionCommand, AZ::SystemAllocator, 0);
-        AZ_RTTI(SelectionCommand, "{07A0CF6A-79FA-4EA3-B056-1C0DA6F36699}");
+        AZ_RTTI(SelectionCommand, "{07A0CF6A-79FA-4EA3-B056-1C0DA6F36699}", UndoSystem::URSequencePoint);
 
         SelectionCommand(const AZStd::vector<AZ::EntityId>& proposedSelection, const AZStd::string& friendlyName);
 

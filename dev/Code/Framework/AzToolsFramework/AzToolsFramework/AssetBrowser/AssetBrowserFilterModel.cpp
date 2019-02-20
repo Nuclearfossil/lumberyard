@@ -12,6 +12,8 @@
 #include <AzToolsFramework/AssetBrowser/AssetBrowserFilterModel.h>
 #include <AzToolsFramework/AssetBrowser/AssetBrowserModel.h>
 #include <AzToolsFramework/AssetBrowser/Search/Filter.h>
+#include <AzToolsFramework/AssetBrowser/Entries/FolderAssetBrowserEntry.h>
+#include <AzToolsFramework/AssetBrowser/Entries/SourceAssetBrowserEntry.h>
 
 #include <QSharedPointer>
 #include <QTimer>
@@ -27,6 +29,7 @@ namespace AzToolsFramework
             : QSortFilterProxyModel(parent)
         {
             m_showColumn.insert(AssetBrowserModel::m_column);
+            m_collator.setNumericMode(true);
         }
 
         AssetBrowserFilterModel::~AssetBrowserFilterModel() = default;
@@ -91,9 +94,8 @@ namespace AzToolsFramework
                     }
 
                     // if both entries are of same type, sort alphabetically
-                    QCollator collator;
-                    collator.setNumericMode(true);
-                    return collator.compare(leftEntry->GetDisplayName().c_str(), rightEntry->GetDisplayName().c_str()) > 0;
+                    
+                    return m_collator.compare(leftEntry->GetDisplayName().c_str(), rightEntry->GetDisplayName().c_str()) > 0;
                 }
             }
             return QSortFilterProxyModel::lessThan(source_left, source_right);

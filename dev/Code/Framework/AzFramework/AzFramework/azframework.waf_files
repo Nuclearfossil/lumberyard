@@ -5,6 +5,10 @@
         ]
     },
     "auto": {
+        "Root": [
+            "AzFrameworkModule.h",
+            "AzFrameworkModule.cpp"
+        ],
         "API": [
             "API/ApplicationAPI.h",
             "API/BootstrapReaderBus.h"
@@ -34,6 +38,9 @@
         "CommandLine": [
             "CommandLine/CommandLine.cpp",
             "CommandLine/CommandLine.h"
+        ],
+        "Viewport": [
+            "Viewport/ViewportColors.h"
         ],
         "Entity": [
             "Entity/BehaviorEntity.cpp",
@@ -190,6 +197,7 @@
             "Network/InterestManagerComponent.cpp",
             "Network/NetBindable.h",
             "Network/NetBindable.cpp",
+            "Network/NetBindingEventsBus.h",
             "Network/NetBindingHandlerBus.h",
             "Network/NetBindingSystemBus.h",
             "Network/NetBindingComponent.h",
@@ -250,6 +258,7 @@
         "Physics/ConstraintComponentBus.h",
         "Physics/PhysicsComponentBus.h",
         "Physics/PhysicsSystemComponentBus.h",
+        "Physics/PhysicsSystemComponentBus.inl",
         "Physics/RagdollPhysicsBus.h"
       ]
     },

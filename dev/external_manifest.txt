@@ -8,7 +8,9 @@ AssetProcessorPlatformConfig.ini
 bootstrap.cfg
 editor.cfg
 engine.json
+engineroot.txt
 lmbr_waf.*
+SetupAssistantUserPreferences.ini
 shadercachegen.cfg
 system*.cfg
 waf_branch_spec.py

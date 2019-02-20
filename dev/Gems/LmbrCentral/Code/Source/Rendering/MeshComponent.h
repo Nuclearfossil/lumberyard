@@ -109,6 +109,7 @@ namespace LmbrCentral
         bool GetLodDistances(const SFrameLodInfo& frameLodInfo, float* distances) const override;
         float GetFirstLodDistance() const override { return m_lodDistance; }
         EERType GetRenderNodeType() override;
+        bool CanExecuteRenderAsJob() override;
         const char* GetName() const override;
         const char* GetEntityClassName() const override;
         Vec3 GetPos(bool bWorldOnly = true) const override;
@@ -196,6 +197,7 @@ namespace LmbrCentral
             bool m_visibilityOccluder; //!< Appropriate for visibility occluding.
             bool m_dynamicMesh; // Mesh can change or deform independent of transform
             bool m_hasStaticTransform;
+            bool m_affectGI; //!< Mesh affects Global Illumination.
 
             //! The Id of the entity we're associated with, for bus subscription.
             //Moved from render mesh to this struct for serialization/reflection utility
@@ -225,6 +227,7 @@ namespace LmbrCentral
 
             //Returns true if the transform is static and the mesh is not deformable.
             bool IsStatic() const;
+            bool AffectsGi() const;
             AZ::Crc32 StaticPropertyVisibility() const;
             static void Reflect(AZ::ReflectContext* context);
 
@@ -267,6 +270,9 @@ namespace LmbrCentral
 
         //! Computed LOD distance.
         float m_lodDistance;
+
+        //! Computed first LOD distance (the following are multiplies of the index)
+        float m_lodDistanceScaled;
 
         //! Identifies whether we've already registered our node with the renderer.
         bool m_isRegisteredWithRenderer;
@@ -313,7 +319,7 @@ namespace LmbrCentral
         bool IsMaterialOwnerReady() override;
         void SetMaterial(_smart_ptr<IMaterial>) override;
         _smart_ptr<IMaterial> GetMaterial() override;
-        void SetMaterialHandle(MaterialHandle) override;
+        void SetMaterialHandle(const MaterialHandle& materialHandle) override;
         MaterialHandle GetMaterialHandle() override;
         void SetMaterialParamVector4(const AZStd::string& /*name*/, const AZ::Vector4& /*value*/, int /*materialId = 1*/) override;
         void SetMaterialParamVector3(const AZStd::string& /*name*/, const AZ::Vector3& /*value*/, int /*materialId = 1*/) override;

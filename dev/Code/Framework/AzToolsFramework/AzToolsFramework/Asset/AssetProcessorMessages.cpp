@@ -183,5 +183,124 @@ namespace AzToolsFramework
                     ->Field("SourceUUID", &SourceFileNotificationMessage::m_sourceUUID);
             }
         }
+
+        //---------------------------------------------------------------------
+        unsigned int GetScanFoldersRequest::MessageType()
+        {
+            static unsigned int messageType = AZ_CRC("AssetProcessor::GetScanFoldersRequest", 0x01274152);
+            return messageType;
+        }
+
+        unsigned int GetScanFoldersRequest::GetMessageType() const
+        {
+            return MessageType();
+        }
+
+        void GetScanFoldersRequest::Reflect(AZ::ReflectContext* context)
+        {
+            auto serialize = azrtti_cast<AZ::SerializeContext*>(context);
+            if (serialize)
+            {
+                serialize->Class<GetScanFoldersRequest>()
+                    ->Version(1)
+                    ->SerializeWithNoData();
+            }
+        }
+
+        //---------------------------------------------------------------------
+        GetScanFoldersResponse::GetScanFoldersResponse(const AZStd::vector<AZStd::string>& scanFolders)
+            : m_scanFolders(scanFolders)
+        {
+        }
+
+        GetScanFoldersResponse::GetScanFoldersResponse(AZStd::vector<AZStd::string>&& scanFolders)
+            : m_scanFolders(AZStd::move(scanFolders))
+        {
+        }
+
+        unsigned int GetScanFoldersResponse::GetMessageType() const
+        {
+            return GetScanFoldersRequest::MessageType();
+        }
+
+        void GetScanFoldersResponse::Reflect(AZ::ReflectContext* context)
+        {
+            auto serialize = azrtti_cast<AZ::SerializeContext*>(context);
+            if (serialize)
+            {
+                serialize->Class<GetScanFoldersResponse, BaseAssetProcessorMessage>()
+                    ->Version(1)
+                    ->Field("ScanFolders", &GetScanFoldersResponse::m_scanFolders);
+            }
+        }
+
+        //---------------------------------------------------------------------
+        unsigned int GetAssetSafeFoldersRequest::MessageType()
+        {
+            static unsigned int messageType = AZ_CRC("AssetProcessor::GetAssetSafeFoldersRequest", 0xf58fd05c);
+            return messageType;
+        }
+
+        unsigned int GetAssetSafeFoldersRequest::GetMessageType() const
+        {
+            return MessageType();
+        }
+
+        void GetAssetSafeFoldersRequest::Reflect(AZ::ReflectContext* context)
+        {
+            auto serialize = azrtti_cast<AZ::SerializeContext*>(context);
+            if (serialize)
+            {
+                serialize->Class<GetAssetSafeFoldersRequest>()
+                    ->Version(1)
+                    ->SerializeWithNoData();
+            }
+        }
+
+        //---------------------------------------------------------------------
+        GetAssetSafeFoldersResponse::GetAssetSafeFoldersResponse(const AZStd::vector<AZStd::string>& assetSafeFolders)
+            : m_assetSafeFolders(assetSafeFolders)
+        {
+        }
+
+        GetAssetSafeFoldersResponse::GetAssetSafeFoldersResponse(AZStd::vector<AZStd::string>&& assetSafeFolders)
+            : m_assetSafeFolders(AZStd::move(assetSafeFolders))
+        {
+        }
+
+        unsigned int GetAssetSafeFoldersResponse::GetMessageType() const
+        {
+            return GetAssetSafeFoldersRequest::MessageType();
+        }
+
+        void GetAssetSafeFoldersResponse::Reflect(AZ::ReflectContext* context)
+        {
+            auto serialize = azrtti_cast<AZ::SerializeContext*>(context);
+            if (serialize)
+            {
+                serialize->Class<GetAssetSafeFoldersResponse, BaseAssetProcessorMessage>()
+                    ->Version(1)
+                    ->Field("AssetSafeFolders", &GetAssetSafeFoldersResponse::m_assetSafeFolders);
+            }
+        }
+
+        //---------------------------------------------------------------------
+        void FileInfosNotificationMessage::Reflect(AZ::ReflectContext* context)
+        {
+            auto serialize = azrtti_cast<AZ::SerializeContext*>(context);
+            if (serialize)
+            {
+                serialize->Class<FileInfosNotificationMessage, BaseAssetProcessorMessage>()
+                    ->Field("NotificationType", &FileInfosNotificationMessage::m_type)
+                    ->Field("FileID", &FileInfosNotificationMessage::m_fileID)
+                    ->Version(1);
+            }
+        }
+
+        unsigned FileInfosNotificationMessage::GetMessageType() const
+        {
+            static unsigned int messageType = AZ_CRC("FileProcessor::FileInfosNotification", 0x001c43f5);
+            return messageType;
+        }
     } // namespace AssetSystem
 } // namespace AzToolsFramework

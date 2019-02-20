@@ -65,6 +65,7 @@ HierarchyWidget::HierarchyWidget(EditorWindow* editorWindow)
 
     QObject::connect(this,
         &QTreeWidget::itemClicked,
+        this,
         [this](QTreeWidgetItem* item, int column)
         {
             HierarchyItem* i = dynamic_cast<HierarchyItem*>(item);
@@ -85,6 +86,7 @@ HierarchyWidget::HierarchyWidget(EditorWindow* editorWindow)
 
     QObject::connect(this,
         &QTreeWidget::itemExpanded,
+        this,
         [this](QTreeWidgetItem* item)
         {
             CommandHierarchyItemToggleIsExpanded::Push(m_editorWindow->GetActiveStack(),
@@ -94,6 +96,7 @@ HierarchyWidget::HierarchyWidget(EditorWindow* editorWindow)
 
     QObject::connect(this,
         &QTreeWidget::itemCollapsed,
+        this,
         [this](QTreeWidgetItem* item)
         {
             CommandHierarchyItemToggleIsExpanded::Push(m_editorWindow->GetActiveStack(),
@@ -150,6 +153,9 @@ void HierarchyWidget::CreateItems(const LyShine::EntityArray& elements)
         }
     }
 
+    // restore the expanded state of all items
+    ApplyElementIsExpanded();
+
     m_inited = true;
 }
 
@@ -162,9 +168,6 @@ void HierarchyWidget::RecreateItems(const LyShine::EntityArray& elements)
     ClearItems();
 
     CreateItems(elements);
-
-    // restore the expanded state of all items
-    ApplyElementIsExpanded();
 
     HierarchyHelpers::SetSelectedItems(this, &selectedEntityIds);
 }
@@ -708,6 +711,17 @@ void HierarchyWidget::ClearItemBeingHovered()
 
     m_itemBeingHovered->SetMouseIsHovering(false);
     m_itemBeingHovered = nullptr;
+}
+
+void HierarchyWidget::UpdateSliceInfo()
+{
+    // Update the slice information (color, font, tooltip) for all elements.
+    // As a simple way of going through all the HierarchyItem's we use the
+    // EntityHelpers::EntityToHierarchyItemMap
+    for (auto mapItem : m_entityItemMap)
+    {
+        mapItem.second->UpdateSliceInfo();
+    }
 }
 
 void HierarchyWidget::DeleteSelectedItems()

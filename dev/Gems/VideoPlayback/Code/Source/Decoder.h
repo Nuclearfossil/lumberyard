@@ -24,6 +24,16 @@
 #include <AzCore/std/parallel/atomic.h>
 #include <AzCore/std/parallel/semaphore.h>
 
+#if defined AZ_RESTRICTED_PLATFORM
+#include AZ_RESTRICTED_FILE(Decoder_h, AZ_RESTRICTED_PLATFORM)
+#endif
+#if defined(AZ_RESTRICTED_SECTION_IMPLEMENTED)
+#undef AZ_RESTRICTED_SECTION_IMPLEMENTED
+#else
+#define AZ_VIDEOPLAYBACK_GEM_TRAIT_ENABLE_DECODER 1
+#endif
+
+#if AZ_VIDEOPLAYBACK_GEM_TRAIT_ENABLE_DECODER
 extern "C"
 {
     #pragma warning( disable : 4244 )   //Disable warning for libav
@@ -159,6 +169,8 @@ namespace AZ
             AVFrame* m_tempFrame = nullptr;             //A temporary frame that acts as a buffer to avoid writing garbage frames directly into m_RGBAFrames
             AZStd::vector<AVFrame*> m_RGBAFrames;       //A collection of frame data that is accessed like a ring buffer. 
 
+            AZ::u64 m_totalFrameCount;
+
             float m_totalDuration;  //The total time in seconds that this video lasts
             float m_currentTime;    //The timestamp of the last frame that was presented
 
@@ -187,3 +199,5 @@ namespace AZ
         };
     } // namespace VideoPlayback
 }//namespace AZ
+
+#endif

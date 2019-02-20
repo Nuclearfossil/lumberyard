@@ -34,7 +34,7 @@ namespace EMotionFX
     class EMFX_API EventHandler
         : public BaseObject
     {
-        MCORE_MEMORYOBJECTCATEGORY(EventHandler, EMFX_DEFAULT_ALIGNMENT, EMFX_MEMCATEGORY_EVENTHANDLERS);
+        AZ_CLASS_ALLOCATOR_DECL
 
     public:
         /**
@@ -267,10 +267,9 @@ namespace EMotionFX
         virtual void OnEndTransition(AnimGraphInstance* animGraphInstance, AnimGraphStateTransition* transition)                              { MCORE_UNUSED(animGraphInstance); MCORE_UNUSED(transition); }
         virtual void Sync(AnimGraphInstance* animGraphInstance, AnimGraphNode* animGraphNode)                                                { MCORE_UNUSED(animGraphInstance); MCORE_UNUSED(animGraphNode); }
         virtual void OnSetVisualManipulatorOffset(AnimGraphInstance* animGraphInstance, uint32 paramIndex, const AZ::Vector3& offset)       { MCORE_UNUSED(animGraphInstance); MCORE_UNUSED(paramIndex); MCORE_UNUSED(offset); }
-        virtual void OnParameterNodeMaskChanged(BlendTreeParameterNode* parameterNode)                                                      { MCORE_UNUSED(parameterNode); }
-        virtual void OnConditionTriggered(AnimGraphInstance* animGraphInstance, AnimGraphTransitionCondition* condition)                      { MCORE_UNUSED(animGraphInstance); MCORE_UNUSED(condition); }
+        virtual void OnParameterNodeMaskChanged(BlendTreeParameterNode* parameterNode, const AZStd::vector<AZStd::string>& newParameterMask)                                                      { MCORE_UNUSED(parameterNode); }
 
-        virtual void OnRenamedNode(AnimGraph* animGraph, AnimGraphNode* node, const MCore::String& oldName)                              { MCORE_UNUSED(animGraph); MCORE_UNUSED(node); MCORE_UNUSED(oldName); }
+        virtual void OnRenamedNode(AnimGraph* animGraph, AnimGraphNode* node, const AZStd::string& oldName)                              { MCORE_UNUSED(animGraph); MCORE_UNUSED(node); MCORE_UNUSED(oldName); }
         virtual void OnCreatedNode(AnimGraph* animGraph, AnimGraphNode* node)                                                            { MCORE_UNUSED(animGraph); MCORE_UNUSED(node); }
         virtual void OnRemoveNode(AnimGraph* animGraph, AnimGraphNode* nodeToRemove)                                                     { MCORE_UNUSED(animGraph); MCORE_UNUSED(nodeToRemove); }
         virtual void OnRemovedChildNode(AnimGraph* animGraph, AnimGraphNode* parentNode)                                                 { MCORE_UNUSED(animGraph); MCORE_UNUSED(parentNode); }
@@ -284,8 +283,6 @@ namespace EMotionFX
 
         virtual void OnScaleActorData(Actor* actor, float scaleFactor)                                                                      { MCORE_UNUSED(actor); MCORE_UNUSED(scaleFactor); }
         virtual void OnScaleMotionData(Motion* motion, float scaleFactor)                                                                   { MCORE_UNUSED(motion); MCORE_UNUSED(scaleFactor); }
-        virtual void OnScaleAnimGraphData(AnimGraph* animGraph, float scaleFactor)                                                       { MCORE_UNUSED(animGraph); MCORE_UNUSED(scaleFactor); }
-
 
     protected:
         /**
@@ -307,7 +304,7 @@ namespace EMotionFX
     class EMFX_API AnimGraphInstanceEventHandler
         : public BaseObject
     {
-        MCORE_MEMORYOBJECTCATEGORY(AnimGraphInstanceEventHandler, EMFX_DEFAULT_ALIGNMENT, EMFX_MEMCATEGORY_EVENTHANDLERS);
+        AZ_CLASS_ALLOCATOR_DECL
 
     public:
         static AnimGraphInstanceEventHandler* Create();
@@ -332,7 +329,7 @@ namespace EMotionFX
     class EMFX_API MotionInstanceEventHandler
         : public BaseObject
     {
-        MCORE_MEMORYOBJECTCATEGORY(MotionInstanceEventHandler, EMFX_DEFAULT_ALIGNMENT, EMFX_MEMCATEGORY_EVENTHANDLERS);
+        AZ_CLASS_ALLOCATOR_DECL
 
     public:
         static MotionInstanceEventHandler* Create();

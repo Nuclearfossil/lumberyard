@@ -58,7 +58,7 @@ namespace GridMate
         {
             LBSTOR_INVALID,
             LBSTOR_INT32,
-            LBSTOR_INT64,   // Only supported on X360 and PS3, not on Steam. // ACCEPTED_USE
+            LBSTOR_INT64,   // Only supported on deprecated platforms, not on Steam.
             LBSTOR_FLOAT,
             LBSTOR_CONTEXT,
         };
@@ -89,6 +89,9 @@ namespace GridMate
         StorageType     m_storageType;      // Specifies C++ data type for this field
         int             m_infoType;         // OBSOLETE PLATFORM ONLY?
         int             m_columnId;         // OBSOLETE PLATFORM ONLY?
+#if defined(AZ_RESTRICTED_PLATFORM)
+#include AZ_RESTRICTED_FILE(LeaderboardService_h, AZ_RESTRICTED_PLATFORM)
+#endif
         gridmate_string m_dataSource;
     };
 

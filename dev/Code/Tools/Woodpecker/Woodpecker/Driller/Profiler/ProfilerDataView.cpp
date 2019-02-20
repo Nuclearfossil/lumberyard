@@ -10,7 +10,7 @@
 *
 */
 
-#include "StdAfx.h"
+#include "stdafx.h"
 
 #include "ProfilerDataView.hxx"
 #include <Woodpecker/Driller/Profiler/ProfilerDataView.moc>
@@ -625,7 +625,7 @@ namespace Driller
             ProfilerDataViewLocal::Reflect(context);
 
             // Driller doesn't use AzToolsFramework directly, so we have to initialize the serialization for the QTreeViewStateSaver
-            AzToolsFramework::QTreeViewStateSaver::Reflect(context);
+            AzToolsFramework::QTreeViewWithStateSaving::Reflect(context);
         }
     }
 }

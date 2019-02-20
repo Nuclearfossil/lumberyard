@@ -120,6 +120,12 @@ namespace LmbrCentral
                     Attribute(AZ::Edit::Attributes::Max, 1.f)->
                     Attribute(AZ::Edit::Attributes::Visibility, &DecalConfiguration::m_deferred)->
 
+                    DataElement(AZ::Edit::UIHandlers::Slider, &DecalConfiguration::m_angleAttenuation, "Angle Attenuation", "amount of angle attenuation computation taken into account")->
+                    Attribute(AZ::Edit::Attributes::ChangeNotify, &DecalConfiguration::MinorPropertyChanged)->
+                    Attribute(AZ::Edit::Attributes::Min, 0.f)->
+                    Attribute(AZ::Edit::Attributes::Max, 1.f)->
+                    Attribute(AZ::Edit::Attributes::Visibility, &DecalConfiguration::m_deferred)->
+
                     ClassElement(AZ::Edit::ClassElements::Group, "Options")->
 
                     DataElement(AZ::Edit::UIHandlers::Default, &DecalConfiguration::m_maxViewDist, "Max view distance", "The furthest distance this decal can be seen from")->
@@ -287,6 +293,7 @@ namespace LmbrCentral
         SDecalProperties decalProperties = m_configuration.GetDecalProperties(transform);
         m_decalRenderNode->SetDecalProperties(decalProperties);
 
+        m_renderFlags |= ERF_COMPONENT_ENTITY;
         m_decalRenderNode->SetRndFlags(m_renderFlags);
         m_decalRenderNode->SetMatrix(AZTransformToLYTransform(transform));
         m_decalRenderNode->SetMinSpec(static_cast<int>(decalProperties.m_minSpec));

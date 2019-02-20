@@ -3,6 +3,7 @@
     {
         "Root":
         [
+            "BuildInfo.h",
             "EBus.h",
             "Docs.h",
             "GridMate.cpp",
@@ -32,6 +33,7 @@
             "Carrier/DefaultTrafficControl.cpp",
             "Carrier/DefaultTrafficControl.h",
             "Carrier/Driver.h",
+            "Carrier/DriverEvents.h",
             "Carrier/Handshake.h",
             "Carrier/Simulator.h",
             "Carrier/SocketDriver.cpp",
@@ -129,6 +131,7 @@
             "Replica/Interest/InterestDefs.h",
             "Replica/Interest/InterestManager.cpp",
             "Replica/Interest/InterestManager.h",
+            "Replica/Interest/InterestQueryResult.h",
             "Replica/Interest/BvDynamicTree.cpp",
             "Replica/Interest/BvDynamicTree.h",
             "Replica/Interest/RulesHandler.h"

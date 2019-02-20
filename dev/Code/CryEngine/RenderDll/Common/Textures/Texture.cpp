@@ -30,7 +30,17 @@
 #include <AzCore/std/string/conversions.h>
 #include <AzFramework/StringFunc/StringFunc.h>
 
-#include <CryEngineAPI.h>
+#if defined(AZ_RESTRICTED_PLATFORM)
+#undef AZ_RESTRICTED_SECTION
+#define TEXTURE_CPP_SECTION_1 1
+#define TEXTURE_CPP_SECTION_2 2
+#define TEXTURE_CPP_SECTION_3 3
+#define TEXTURE_CPP_SECTION_4 4
+#define TEXTURE_CPP_SECTION_5 5
+#define TEXTURE_CPP_SECTION_6 6
+#define TEXTURE_CPP_SECTION_7 7
+#endif
+
 #if defined(OPENGL_ES) || defined(CRY_USE_METAL)
 #include "../../XRenderD3D9/DriverD3D.h" // for gcpRendD3D
 #endif
@@ -47,12 +57,12 @@ bool CTexture::s_bInLevelPhase = false;
 bool CTexture::s_bPrestreamPhase;
 int CTexture::s_nStreamingThroughput = 0;
 float CTexture::s_nStreamingTotalTime = 0;
-std::vector<STexState> CTexture::s_TexStates;
+AZStd::vector<STexState, AZ::StdLegacyAllocator> CTexture::s_TexStates;
 CTextureStreamPoolMgr* CTexture::s_pPoolMgr;
-std::set<string> CTexture::s_vTexReloadRequests;
+AZStd::set<string, AZStd::less<string>, AZ::StdLegacyAllocator> CTexture::s_vTexReloadRequests;
 CryCriticalSection CTexture::s_xTexReloadLock;
 #ifdef TEXTURE_GET_SYSTEM_COPY_SUPPORT
-CTexture::LowResSystemCopyType CTexture::s_LowResSystemCopy;
+StaticInstance<CTexture::LowResSystemCopyType> CTexture::s_LowResSystemCopy;
 #endif
 
 bool CTexture::m_bLoadedSystem;
@@ -82,6 +92,10 @@ CTexture* CTexture::s_ptexSceneNormalsBent;
 CTexture* CTexture::s_ptexAOColorBleed;
 CTexture* CTexture::s_ptexSceneDiffuse;
 CTexture* CTexture::s_ptexSceneSpecular;
+#if defined(AZ_RESTRICTED_PLATFORM)
+#define AZ_RESTRICTED_SECTION TEXTURE_CPP_SECTION_1
+#include AZ_RESTRICTED_FILE(Texture_cpp, AZ_RESTRICTED_PLATFORM)
+#endif
 CTexture* CTexture::s_ptexAmbientLookup;
 
 // Post-process related textures
@@ -174,9 +188,9 @@ CTexture* CTexture::s_ptexFlaresGather = NULL;
 SEnvTexture CTexture::s_EnvCMaps[MAX_ENVCUBEMAPS];
 SEnvTexture CTexture::s_EnvTexts[MAX_ENVTEXTURES];
 
-TArray<SEnvTexture> CTexture::s_CustomRT_2D;
+StaticInstance<TArray<SEnvTexture>> CTexture::s_CustomRT_2D;
 
-TArray<CTexture> CTexture::s_ShaderTemplates(EFTT_MAX);
+StaticInstance<TArray<CTexture>> CTexture::s_ShaderTemplates(EFTT_MAX);
 bool CTexture::s_ShaderTemplatesInitialized = false;
 
 CTexture* CTexture::s_pTexNULL = 0;
@@ -267,7 +281,8 @@ SResourceView SResourceView::UnorderedAccessView(ETEX_Format nFormat, int nFirst
 CTexture::~CTexture()
 {
     // sizes of these structures should NOT exceed L2 cache line!
-#if defined(PLATFORM_64BIT)
+    // offsetof with MSVC's crt and clang produces an error
+#if defined(PLATFORM_64BIT) && !(defined(AZ_PLATFORM_WINDOWS) && defined(AZ_COMPILER_CLANG))
     COMPILE_TIME_ASSERT((offsetof(CTexture, m_composition) - offsetof(CTexture, m_pFileTexMips)) <= 64);
     COMPILE_TIME_ASSERT((offsetof(CTexture, m_pFileTexMips) % 64) == 0);
 #endif
@@ -402,7 +417,7 @@ CTexture* CTexture::NewTexture(const char* name, uint32 nFlags, ETEX_Format eTFD
     AzFramework::StringFunc::Path::GetExtension(name, fileExtension);
     if (name[0] == '$' || fileExtension.empty())
     {
-        //If the name starts with $ or it does not have any extension then it is one of the special texture 
+        //If the name starts with $ or it does not have any extension then it is one of the special texture
         // that the engine requires and we would not be modifying the name
         normalizedFile = name;
     }
@@ -473,8 +488,6 @@ CTexture* CTexture::CreateTextureObject(const char* name, uint32 nWidth, uint32 
     SYNCHRONOUS_LOADING_TICK();
 
     bool bFound = false;
-
-    MEMSTAT_CONTEXT_FMT(EMemStatContextTypes::MSC_Texture, 0, "%s", name);
 
     CTexture* pTex = NewTexture(name, nFlags, eTF, bFound);
     if (bFound)
@@ -749,7 +762,12 @@ bool CTexture::Reload()
         bOK = CreateDeviceTexture(pData);
         assert(bOK);
     }
-    PostCreate();
+
+    // Post Create assumes the texture loaded successfully so don't call it if that's not the case
+    if (bOK)
+    {
+        PostCreate();
+    }
 
     return bOK;
 }
@@ -759,9 +777,6 @@ CTexture* CTexture::ForName(const char* name, uint32 nFlags, ETEX_Format eTFDst)
     SLICE_AND_SLEEP();
 
     bool bFound = false;
-
-    MEMSTAT_CONTEXT(EMemStatContextTypes::MSC_Other, 0, "Textures");
-    MEMSTAT_CONTEXT_FMT(EMemStatContextTypes::MSC_Texture, 0, "%s", name);
 
     CRY_DEFINE_ASSET_SCOPE("Texture", name);
 
@@ -801,7 +816,7 @@ CTexture* CTexture::ForName(const char* name, uint32 nFlags, ETEX_Format eTFDst)
     ESystemGlobalState currentGlobalState = GetISystem()->GetSystemGlobalState();
     const bool levelLoading = currentGlobalState == ESYSTEM_GLOBAL_STATE_LEVEL_LOAD_START;
 
-    // Load textures immediately during level load since texture load 
+    // Load textures immediately during level load since texture load
     // requests during this phase are probably coming from a loading screen.
     if (levelLoading || !bPrecachePhase)
     {
@@ -828,7 +843,7 @@ struct CompareTextures
 {
     bool operator()(const CTexture* a, const CTexture* b)
     {
-        return (_stricmp(a->GetSourceName(), b->GetSourceName()) < 0);
+        return (azstricmp(a->GetSourceName(), b->GetSourceName()) < 0);
     }
 };
 
@@ -1510,7 +1525,15 @@ uint32 CTexture::TextureDataSize(uint32 nWidth, uint32 nHeight, uint32 nDepth, u
 
     if (eTM != eTM_None)
     {
+#if defined(AZ_RESTRICTED_PLATFORM)
+#define AZ_RESTRICTED_SECTION TEXTURE_CPP_SECTION_2
+#include AZ_RESTRICTED_FILE(Texture_cpp, AZ_RESTRICTED_PLATFORM)
+#endif
 
+#if defined(AZ_RESTRICTED_PLATFORM)
+#define AZ_RESTRICTED_SECTION TEXTURE_CPP_SECTION_3
+#include AZ_RESTRICTED_FILE(Texture_cpp, AZ_RESTRICTED_PLATFORM)
+#endif
 
         __debugbreak();
         return 0;
@@ -1912,7 +1935,7 @@ int __cdecl TexCallback(const VOID * arg1, const VOID * arg2)
     {
         return 1;
     }
-    return _stricmp(ti1->GetSourceName(), ti2->GetSourceName());
+    return azstricmp(ti1->GetSourceName(), ti2->GetSourceName());
 }
 
 int __cdecl TexCallbackMips(const VOID * arg1, const VOID * arg2)
@@ -1935,7 +1958,7 @@ int __cdecl TexCallbackMips(const VOID * arg1, const VOID * arg2)
     {
         return 1;
     }
-    return _stricmp(ti1->GetSourceName(), ti2->GetSourceName());
+    return azstricmp(ti1->GetSourceName(), ti2->GetSourceName());
 }
 
 void CTexture::Update()
@@ -1947,13 +1970,13 @@ void CTexture::Update()
 
     // reload pending texture reload requests
     {
-        std::set<string> queue;
+        AZStd::set<string, AZStd::less<string>, AZ::StdLegacyAllocator> queue;
 
         s_xTexReloadLock.Lock();
         s_vTexReloadRequests.swap(queue);
         s_xTexReloadLock.Unlock();
 
-        for (std::set<string>::iterator i = queue.begin(); i != queue.end(); i++)
+        for (auto i = queue.begin(); i != queue.end(); i++)
         {
             ReloadFile(*i);
         }
@@ -2354,7 +2377,7 @@ Ang3 sDeltAngles(Ang3& Ang0, Ang3& Ang1)
     return out;
 }
 
-SEnvTexture* CTexture::FindSuitableEnvTex(Vec3& Pos, Ang3& Angs, bool bMustExist, int RendFlags, bool bUseExistingREs, CShader* pSH, CShaderResources* pRes, CRenderObject* pObj, bool bReflect, CRendElementBase* pRE, bool* bMustUpdate)
+SEnvTexture* CTexture::FindSuitableEnvTex(Vec3& Pos, Ang3& Angs, bool bMustExist, int RendFlags, bool bUseExistingREs, CShader* pSH, CShaderResources* pRes, CRenderObject* pObj, bool bReflect, IRenderElement* pRE, bool* bMustUpdate)
 {
     SEnvTexture* cm = NULL;
     float time0 = iTimer->GetAsyncCurTime();
@@ -2559,10 +2582,10 @@ void CTexture::ShutDown()
     {
         for (i = 0; i < EFTT_MAX; i++)
         {
-            s_ShaderTemplates[i].~CTexture();
+            (*s_ShaderTemplates)[i].~CTexture();
         }
     }
-    s_ShaderTemplates.Free();
+    s_ShaderTemplates->Free();
 
     SAFE_DELETE(s_pTexNULL);
 
@@ -2762,7 +2785,7 @@ void CTexture::ReleaseSystemTextures()
 
     SAFE_RELEASE_FORCE(s_defaultEnvironmentProbeDummy);
 
-    s_CustomRT_2D.Free();
+    s_CustomRT_2D->Free();
 
     s_pPoolMgr->Flush();
 
@@ -2782,11 +2805,9 @@ void CTexture::LoadDefaultSystemTextures()
     char str[256];
     int i;
 
-    MEMSTAT_CONTEXT(EMemStatContextTypes::MSC_Other, 0, "Engine textures");
-
     if (!m_bLoadedSystem)
     {
-        ScopedSwitchToGlobalHeap useGlobalHeap;
+        
 
         m_bLoadedSystem = true;
 
@@ -2822,6 +2843,10 @@ void CTexture::LoadDefaultSystemTextures()
         s_ptexSceneNormalsMapMS = CTexture::CreateTextureObject("$SceneNormalsMapMS", 0, 0, 1, eTT_2D, FT_DONT_RELEASE | FT_DONT_STREAM | FT_USAGE_RENDERTARGET, eTF_Unknown, TO_SCENE_NORMALMAP_MS);
         s_ptexSceneDiffuseAccMapMS = CTexture::CreateTextureObject("$SceneDiffuseAccMS", 0, 0, 1, eTT_2D, FT_DONT_RELEASE | FT_DONT_STREAM | FT_USAGE_RENDERTARGET, eTF_Unknown, TO_SCENE_DIFFUSE_ACC_MS);
         s_ptexSceneSpecularAccMapMS = CTexture::CreateTextureObject("$SceneSpecularAccMS", 0, 0, 1, eTT_2D, FT_DONT_RELEASE | FT_DONT_STREAM | FT_USAGE_RENDERTARGET, eTF_Unknown, TO_SCENE_SPECULAR_ACC_MS);
+#if defined(AZ_RESTRICTED_PLATFORM)
+#define AZ_RESTRICTED_SECTION TEXTURE_CPP_SECTION_4
+#include AZ_RESTRICTED_FILE(Texture_cpp, AZ_RESTRICTED_PLATFORM)
+#endif
         s_ptexRT_ShadowPool = CTexture::CreateTextureObject("$RT_ShadowPool", 0, 0, 1, eTT_2D, FT_DONT_STREAM | FT_USAGE_RENDERTARGET | FT_USAGE_DEPTHSTENCIL, eTF_Unknown);
         //  Confetti BEGIN: Igor Lobanchikov
         s_ptexRT_ShadowStub = CTexture::CreateTextureObject("$RT_ShadowStub", 0, 0, 1, eTT_2D, FT_DONT_STREAM | FT_USAGE_RENDERTARGET | FT_USAGE_DEPTHSTENCIL, eTF_Unknown);
@@ -2879,6 +2904,10 @@ void CTexture::LoadDefaultSystemTextures()
             s_ptexSceneNormalsBent = CTexture::CreateTextureObject("$SceneNormalsBent", 0, 0, 1, eTT_2D, nRTFlags, eTF_R8G8B8A8);
             s_ptexSceneDiffuse = CTexture::CreateTextureObject("$SceneDiffuse", 0, 0, 1, eTT_2D, nRTFlags, eTF_R8G8B8A8);
             s_ptexSceneSpecular = CTexture::CreateTextureObject("$SceneSpecular", 0, 0, 1, eTT_2D, nRTFlags, eTF_R8G8B8A8);
+#if defined(AZ_RESTRICTED_PLATFORM)
+#define AZ_RESTRICTED_SECTION TEXTURE_CPP_SECTION_5
+#include AZ_RESTRICTED_FILE(Texture_cpp, AZ_RESTRICTED_PLATFORM)
+#endif
             s_ptexSceneDiffuseAccMap = CTexture::CreateTextureObject("$SceneDiffuseAcc", 0, 0, 1, eTT_2D, nRTFlags, eTF_R8G8B8A8, TO_SCENE_DIFFUSE_ACC);
             s_ptexSceneSpecularAccMap = CTexture::CreateTextureObject("$SceneSpecularAcc", 0, 0, 1, eTT_2D, nRTFlags, eTF_R8G8B8A8, TO_SCENE_SPECULAR_ACC);
             s_ptexAmbientLookup = CTexture::CreateTextureObject("$AmbientLookup", 0, 0, 1, eTT_2D, nRTFlags, eTF_R8G8B8A8);
@@ -2887,7 +2916,7 @@ void CTexture::LoadDefaultSystemTextures()
             s_ptexFlaresGather = CTexture::CreateTextureObject("$FlaresGather", 0, 0, 1, eTT_2D, nRTFlags, eTF_R8G8B8A8);
             for (i = 0; i < MAX_OCCLUSION_READBACK_TEXTURES; i++)
             {
-                sprintf(str, "$FlaresOcclusion_%d", i);
+                azsprintf(str, "$FlaresOcclusion_%d", i);
                 s_ptexFlaresOcclusionRing[i] = CTexture::CreateTextureObject(str, 0, 0, 1, eTT_2D, nRTFlags, eTF_R8G8B8A8);
             }
 
@@ -2901,7 +2930,7 @@ void CTexture::LoadDefaultSystemTextures()
 #endif
             s_ptexWaterOcean = CTexture::CreateTextureObject("$WaterOceanMap", 64, 64, 1, eTT_2D, waterOceanMapFlags, eTF_Unknown, TO_WATEROCEANMAP);
             s_ptexWaterVolumeTemp = CTexture::CreateTextureObject("$WaterVolumeTemp", 64, 64, 1, eTT_2D, waterVolumeTempFlags, eTF_Unknown);
-            
+
             s_ptexWaterVolumeDDN = CTexture::CreateTextureObject("$WaterVolumeDDN", 64, 64, 1, eTT_2D, /*FT_DONT_RELEASE |*/ FT_DONT_STREAM | FT_USAGE_RENDERTARGET | FT_FORCE_MIPS, eTF_Unknown,  TO_WATERVOLUMEMAP);
             s_ptexWaterVolumeRefl[0] = CTexture::CreateTextureObject("$WaterVolumeRefl", 64, 64, 1, eTT_2D, FT_DONT_RELEASE | FT_DONT_STREAM | FT_USAGE_RENDERTARGET | FT_FORCE_MIPS, eTF_Unknown, TO_WATERVOLUMEREFLMAP);
             s_ptexWaterVolumeRefl[1] = CTexture::CreateTextureObject("$WaterVolumeReflPrev", 64, 64, 1, eTT_2D, FT_DONT_RELEASE | FT_DONT_STREAM | FT_USAGE_RENDERTARGET | FT_FORCE_MIPS, eTF_Unknown, TO_WATERVOLUMEREFLMAPPREV);
@@ -2914,8 +2943,6 @@ void CTexture::LoadDefaultSystemTextures()
             if (!s_ptexZTarget)
             {
                 //for d3d10 we cannot free it during level transition, therefore allocate once and keep it
-                ScopedSwitchToGlobalHeap globalHeapScope;
-
 #if defined(OPENGL_ES) || defined(CRY_USE_METAL)
                 // Custom Z-Target for GMEM render path
                 if (gcpRendD3D && gcpRendD3D->FX_GetEnabledGmemPath(nullptr))
@@ -2945,6 +2972,9 @@ void CTexture::LoadDefaultSystemTextures()
         {
             s_ptexHDRTarget = CTexture::CreateTextureObject("$HDRTarget", 0, 0, 1, eTT_2D, nRTFlags, eTF_Unknown);
         }
+#elif defined(AZ_RESTRICTED_PLATFORM)
+#define AZ_RESTRICTED_SECTION TEXTURE_CPP_SECTION_6
+#include AZ_RESTRICTED_FILE(Texture_cpp, AZ_RESTRICTED_PLATFORM)
 #endif
 
         // Create dummy texture object for terrain and clouds lightmap
@@ -2952,7 +2982,7 @@ void CTexture::LoadDefaultSystemTextures()
 
         for (i = 0; i < 8; i++)
         {
-            sprintf(str, "$FromRE_%d", i);
+            azsprintf(str, "$FromRE_%d", i);
             if (!s_ptexFromRE[i])
             {
                 s_ptexFromRE[i] = CTexture::CreateTextureObject(str, 0, 0, 1, eTT_2D, FT_DONT_RELEASE | FT_DONT_STREAM | FT_USAGE_RENDERTARGET, eTF_Unknown, TO_FROMRE0 + i);
@@ -2961,13 +2991,13 @@ void CTexture::LoadDefaultSystemTextures()
 
         for (i = 0; i < 8; i++)
         {
-            sprintf(str, "$ShadowID_%d", i);
+            azsprintf(str, "$ShadowID_%d", i);
             s_ptexShadowID[i] = CTexture::CreateTextureObject(str, 0, 0, 1, eTT_2D, FT_DONT_RELEASE | FT_DONT_STREAM | FT_USAGE_RENDERTARGET, eTF_Unknown, TO_SHADOWID0 + i);
         }
 
         for (i = 0; i < 2; i++)
         {
-            sprintf(str, "$FromRE%d_FromContainer", i);
+            azsprintf(str, "$FromRE%d_FromContainer", i);
             if (!s_ptexFromRE_FromContainer[i])
             {
                 s_ptexFromRE_FromContainer[i] = CTexture::CreateTextureObject(str, 0, 0, 1, eTT_2D, FT_DONT_RELEASE | FT_DONT_STREAM | FT_USAGE_RENDERTARGET, eTF_Unknown, TO_FROMRE0_FROM_CONTAINER + i);
@@ -2985,9 +3015,9 @@ void CTexture::LoadDefaultSystemTextures()
 
         for (i = 0; i < EFTT_MAX; i++)
         {
-            ::new(&s_ShaderTemplates[i])CTexture(FT_DONT_RELEASE);
-            s_ShaderTemplates[i].SetCustomID(EFTT_DIFFUSE + i);
-            s_ShaderTemplates[i].SetFlags(FT_DONT_RELEASE);
+            ::new(&((*s_ShaderTemplates)[i]))CTexture(FT_DONT_RELEASE);
+            (*s_ShaderTemplates)[i].SetCustomID(EFTT_DIFFUSE + i);
+            (*s_ShaderTemplates)[i].SetFlags(FT_DONT_RELEASE);
         }
         s_ShaderTemplatesInitialized = true;
 
@@ -3005,6 +3035,10 @@ void CTexture::LoadDefaultSystemTextures()
             s_defaultEnvironmentProbeDummy = CTexture::CreateTextureObject("$DefaultEnvironmentProbe", 0, 0, 1, eTT_2D, FT_DONT_RELEASE | FT_DONT_STREAM, eTF_Unknown, TO_DEFAULT_ENVIRONMENT_PROBE);
         }
 
+#if defined(AZ_RESTRICTED_PLATFORM)
+#define AZ_RESTRICTED_SECTION TEXTURE_CPP_SECTION_7
+#include AZ_RESTRICTED_FILE(Texture_cpp, AZ_RESTRICTED_PLATFORM)
+#endif
     }
 #endif
 }
@@ -3329,4 +3363,17 @@ CTexture* CTexture::GetZTargetTexture()
 int CTexture::GetTextureState(const STexState& TS)
 {
     return GetTexState(TS);
+}
+
+void CTexture::ApplyForID(int id, int nTUnit, int nTState, int nTexMaterialSlot, int nSUnit, bool useWhiteDefault)
+{
+    CTexture* pTex = id > 0 ? CTexture::GetByID(id) : nullptr;
+    if (pTex)
+    {
+        pTex->Apply(nTUnit, nTState, nTexMaterialSlot, nSUnit);
+    }
+    else if (useWhiteDefault)
+    {
+        CTextureManager::Instance()->GetWhiteTexture()->Apply(nTUnit, nTState, nTexMaterialSlot, nSUnit);
+    }
 }

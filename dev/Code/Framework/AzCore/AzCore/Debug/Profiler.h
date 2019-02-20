@@ -26,7 +26,7 @@ namespace AZ
 {
     namespace Debug
     {
-        using ProfileCategoryPrimitiveType = AZ::u32;
+        using ProfileCategoryPrimitiveType = AZ::u64;
 
         /**
         * Profiling categories consumed by AZ_PROFILE_FUNCTION and AZ_PROFILE_SCOPE variants for profile filtering
@@ -66,22 +66,24 @@ namespace AZ
             AzRender,
             AzFramework,
             AzToolsFramework,
-            // Add new major categories here (and add names to the parallel position in ProfileCategoryNames) - these categories are enabled by default
             ScriptCanvas,
+            // Add new major categories here (and add names to the parallel position in ProfileCategoryNames) - these categories are enabled by default
 
             FirstDetailedCategory,
             RendererDetailed = FirstDetailedCategory,
             ThreeDEngineDetailed,
+            JobManagerDetailed,
             // Add new detailed categories here (and add names to the parallel position in ProfileCategoryNames) -- these categories are disabled by default
             
             // Internal reserved categories, not for use with performance events
             FirstReservedCategory,
             MemoryReserved = FirstReservedCategory,
+            Global,
 
             // Must be last
             Count
         };
-        static_assert(static_cast<ProfileCategoryPrimitiveType>(ProfileCategory::Count) < (sizeof(ProfileCategoryPrimitiveType) * 8), "The number of profile categories must not exceed the number of bits in ProfileCategoryPrimitiveType");
+        static_assert(static_cast<size_t>(ProfileCategory::Count) < (sizeof(ProfileCategoryPrimitiveType) * 8), "The number of profile categories must not exceed the number of bits in ProfileCategoryPrimitiveType");
 
         /**
         * Parallel array to ProfileCategory as string category names to be used as Driller category names or for debug purposes
@@ -121,11 +123,13 @@ namespace AZ
             "ScriptCanvas",
 
             "RendererDetailed",
-            "3EngineDetailed",
+            "3DEngineDetailed",
+            "JobManagerDetailed",
 
-            "MemoryReserved"
+            "MemoryReserved",
+            "Global"
         };
-        static_assert(AZ_ARRAY_SIZE(ProfileCategoryNames) == static_cast<AZ::u32>(ProfileCategory::Count), "ProfileCategory and ProfileCategoryNames size mismatch");
+        static_assert(AZ_ARRAY_SIZE(ProfileCategoryNames) == static_cast<size_t>(ProfileCategory::Count), "ProfileCategory and ProfileCategoryNames size mismatch");
     }
 }
 
@@ -237,7 +241,7 @@ namespace AZ
 #endif // AZ_PROFILER_MACRO_DISABLE
 
 #ifndef AZ_PROFILE_FUNCTION
-// No other profiler has defined the performance markers AZ_PROFILE_SCOPE (and friends), fall back to a Driller implementation
+// No other profiler has defined the performance markers AZ_PROFILE_SCOPE (and friends), fallback to a Driller implementation
 #   define AZ_INTERNAL_PROF_VERIFY_CAT(category) static_assert(category < AZ::Debug::ProfileCategory::Count, "Invalid profile category")
 #   define AZ_INTERNAL_PROF_CAT_NAME(category) AZ::Debug::ProfileCategoryNames[static_cast<AZ::u32>(category)]
 
@@ -263,12 +267,33 @@ namespace AZ
         AZ_INTERNAL_PROF_VERIFY_CAT(category); AZ_PROFILE_TIMER(AZ_INTERNAL_PROF_CAT_NAME(category))
 #endif
 
+#ifndef AZ_PROFILE_INTERVAL_START
+// No other profiler has defined the performance markers AZ_PROFILE_INTERVAL_START/END, fallback to a Driller implementation (currently empty)
+#   define AZ_INTERNAL_PROF_VERIFY_INTERVAL_ID(id) static_assert(sizeof(id) <= sizeof(AZ::u64), "Interval id must be a unique value no larger than 64-bits")
+#   define AZ_PROFILE_INTERVAL_START(category, id, ...) \
+        AZ_INTERNAL_PROF_VERIFY_CAT(category); AZ_INTERNAL_PROF_VERIFY_INTERVAL_ID(id)
+#   define AZ_PROFILE_INTERVAL_END(category, id) \
+        AZ_INTERNAL_PROF_VERIFY_CAT(category); AZ_INTERNAL_PROF_VERIFY_INTERVAL_ID(id)
+#endif
+
+#ifndef AZ_PROFILE_DATAPOINT
+// No other profiler has defined the performance markers AZ_PROFILE_DATAPOINT, fallback to a Driller implementation (currently empty)
+#define AZ_PROFILE_DATAPOINT(category, name, value) \
+        AZ_INTERNAL_PROF_VERIFY_CAT(category); (void)(name); (void)value
+#define AZ_PROFILE_DATAPOINT_PERCENT(category, name, value) \
+        AZ_INTERNAL_PROF_VERIFY_CAT(category); (void)(name); (void)value
+#endif
+
 #ifndef AZ_PROFILE_MEMORY_ALLOC
 // No other profiler has defined the performance markers AZ_PROFILE_MEMORY_ALLOC (and friends), fall back to a Driller implementation (currently empty)
-#   define AZ_PROFILE_MEMORY_ALLOC(category, address, size, context)
-#   define AZ_PROFILE_MEMORY_ALLOC_EX(category, filename, lineNumber, address, size, context)
-#   define AZ_PROFILE_MEMORY_FREE(category, address)
-#   define AZ_PROFILE_MEMORY_FREE_EX(category, filename, lineNumber, address)
+#   define AZ_PROFILE_MEMORY_ALLOC(category, address, size, context) \
+        AZ_INTERNAL_PROF_VERIFY_CAT(category); (void)(context)
+#   define AZ_PROFILE_MEMORY_ALLOC_EX(category, filename, lineNumber, address, size, context) \
+        AZ_INTERNAL_PROF_VERIFY_CAT(category); (void)(context)
+#   define AZ_PROFILE_MEMORY_FREE(category, address) \
+        AZ_INTERNAL_PROF_VERIFY_CAT(category)
+#   define AZ_PROFILE_MEMORY_FREE_EX(category, filename, lineNumber, address) \
+        AZ_INTERNAL_PROF_VERIFY_CAT(category)
 #endif
 
 namespace AZStd

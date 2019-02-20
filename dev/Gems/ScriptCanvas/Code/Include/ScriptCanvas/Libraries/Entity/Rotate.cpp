@@ -42,8 +42,8 @@ namespace ScriptCanvas
                             ->ClassElement(AZ::Edit::ClassElements::EditorData, "")
                             ->Attribute(AZ::Edit::Attributes::Category, "Entity/Transform")
                             ->Attribute(AZ::Edit::Attributes::CategoryStyle, ".method")
+                            ->Attribute(ScriptCanvas::Attributes::Node::TitlePaletteOverride, "MethodNodeTitlePalette")
                             ->Attribute(AZ::Edit::Attributes::Icon, "Editor/Icons/ScriptCanvas/Rotate.png")
-                            ->Attribute(AZ::Edit::Attributes::Visibility, AZ::Edit::PropertyVisibility::ShowChildrenOnly)
                             ->Attribute(AZ::Edit::Attributes::AutoExpand, true)
                             ;
                     }
@@ -55,7 +55,7 @@ namespace ScriptCanvas
                 AddSlot("In", "", SlotType::ExecutionIn);
                 AddSlot("Out", "", SlotType::ExecutionOut);
                 AddInputDatumSlot(k_setEntityName, "The entity to apply the rotation on.", Datum::eOriginality::Original, ScriptCanvas::SelfReferenceId);
-                AddInputDatumSlot(k_setAnglesName, "Euler angles, Pitch/Yaw/Roll.", Data::Type::BehaviorContextObject(AZ::AzTypeInfo<AZ::Vector3>::Uuid()), Datum::eOriginality::Original);
+                AddInputDatumSlot(k_setAnglesName, "Euler angles, Pitch/Yaw/Roll.", Data::Type::Vector3(), Datum::eOriginality::Original);
             }
 
             void Rotate::OnInputSignal(const SlotId&)
@@ -93,18 +93,24 @@ namespace ScriptCanvas
                             }
                         }
 
-                        AZ::Transform rotation(
-                              AZ::Transform::CreateRotationX(AZ::DegToRad(angles.GetX()))
-                            * AZ::Transform::CreateRotationY(AZ::DegToRad(angles.GetY()))
-                            * AZ::Transform::CreateRotationZ(AZ::DegToRad(angles.GetZ()))
-                        );
+                        AZ::Quaternion rotation = AZ::ConvertEulerDegreesToQuaternion(angles);
 
                         AZ::Transform currentTransform = AZ::Transform::CreateIdentity();
                         AZ::TransformBus::EventResult(currentTransform, targetEntity, &AZ::TransformInterface::GetWorldTM);
                         
-                        auto position = currentTransform.GetTranslation();
-                        AZ::Transform newTransform = rotation * currentTransform;
+                        AZ::Vector3 position = currentTransform.GetTranslation();
+
+                        AZ::Quaternion currentRotation = AZ::Quaternion::CreateFromTransform(currentTransform);
+
+                        AZ::Quaternion newRotation = (rotation * currentRotation);
+                        newRotation.Normalize();
+
+                        AZ::Transform newTransform = AZ::Transform::CreateIdentity();
+
+                        newTransform.CreateScale(currentTransform.ExtractScale());
+                        newTransform.SetRotationPartFromQuaternion(newRotation);
                         newTransform.SetTranslation(position);
+
                         AZ::TransformBus::Event(targetEntity, &AZ::TransformInterface::SetWorldTM, newTransform);
                     }
                 }

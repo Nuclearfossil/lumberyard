@@ -47,15 +47,6 @@ local weaponcontroller =
 			MaxUpAimAngle = {default = 55, description = "Maximum angle that the character can aim upwards in degrees."},
 			MaxDownAimAngle = {default = 35, description = "Maximum angle that the character can aim downwards in degrees."},
 			MaxHorizontalAimAngle = {default = 155, description = "Maximum angle in degrees that the player can aim behind them relative to the forward direction."},
-			AimWeightSpine1 = {default = 0.3},
-			AimWeightSpine2 = {default = 0.3},
-			AimWeightSpine3 = {default = 0.3},
-			AimWeightShoulder = {default = 0.8},
-			AimWeightUpperArm = {default = 0.8},
-			AimWeightLowerArm = {default = 0.8},
-			AimWeightHand = {default = 1.0},
-			AimWeightNeck = {default = 1.0},
-			AimWeightHead = {default = 1.0},
 		},
         InitialState = "Down",
         DebugStateMachine = false,
@@ -96,9 +87,9 @@ local weaponcontroller =
         {      
             OnEnter = function(self, sm)
 				self.aimTimer = sm.UserData.Properties.Weapons.AimDelay;
-				--AimIKComponentRequestBus.Event.EnableAimIK(sm.EntityId, true);
 				self.aimLerpTime = sm.UserData.Properties.Weapons.BeginAimingLerpTime;
 				sm.UserData.animParamUpdateFlags:reset();
+				GameplayNotificationBus.Event.OnEventBegin(GameplayNotificationId(sm.UserData.entityId, "OnStartAiming", "float"), 0);
 				self.aimLerpTarget = 1.0;
 				self.aimTimer = 0.0;
             end,
@@ -133,7 +124,7 @@ local weaponcontroller =
 				}
             },
         },
-		-- Small buffer after raising gun to ensure AimIK has caught up
+		-- Small buffer after raising gun
 		RisingInBuffer = 
 		{
 			OnEnter = function(self, sm)
@@ -162,7 +153,7 @@ local weaponcontroller =
 				},
 				Dead = 
 				{
-					Priotity = 2,
+					Priority = 2,
 					Evaluate = function(state, sm)
 						return sm.UserData.IsOwnerDead;
 					end
@@ -257,7 +248,6 @@ local weaponcontroller =
         Lowering = 
         {      
             OnEnter = function(self, sm)
-				--AimIKComponentRequestBus.Event.EnableAimIK(sm.EntityId, false);
 				self.aimLerpTime = sm.UserData.Properties.Weapons.EndAimingLerpTime;
 				self.aimLerpTarget = 0;
 				self.aimLerpComplete = nil;
@@ -303,7 +293,6 @@ local weaponcontroller =
 				sm.UserData.WantsToShoot = false;
 				self.weaponTransform = TransformBus.Event.GetWorldTM(sm.UserData.weapon);
 				-- Stop aiming
-				AimIKComponentRequestBus.Event.EnableAimIK(sm.EntityId, false);
 				self.aimLerpTime = sm.UserData.Properties.Weapons.EndAimingLerpTime;
 				self.aimLerpTarget = 0;
 				self.aimLerpComplete = nil;
@@ -372,17 +361,7 @@ function weaponcontroller:OnActivate()
     self.tickBusHandler = TickBus.Connect(self);
 	self.performedFirstUpdate = false;
 	self.setupComplete = false;
-
-    self.Fragments = {};
-
-	-- AimIK setup
-	AimIKComponentRequestBus.Event.EnableAimIK(self.entityId, false);
-	AimIKComponentRequestBus.Event.SetAimIKLayer(self.entityId, 3);
-	AimIKComponentRequestBus.Event.SetAimIKPolarCoordinatesMaxRadiansPerSecond(self.entityId, Vector2(24.0, 24.0));
-	AimIKComponentRequestBus.Event.SetAimIKPolarCoordinatesSmoothTimeSeconds(self.entityId, 0.0);
-	AimIKComponentRequestBus.Event.SetAimIKFadeOutTime(self.entityId, self.Properties.Weapons.EndAimingLerpTime);
-	AimIKComponentRequestBus.Event.SetAimIKFadeInTime(self.entityId, self.Properties.Weapons.BeginAimingLerpTime);
-	--self.Fragments.Aiming = MannequinRequestsBus.Event.QueueFragment(self.entityId, 1, "Aiming", "", false);
+	
 	self.WantsToShoot = false;
 	self.IsTargetingEnemy = false;
 	self.isAiming = false;
@@ -426,29 +405,18 @@ function weaponcontroller:OnActivate()
 	self.debugFireMessage = false;
 	self.debugFireMessageEventId = GameplayNotificationId(self.entityId, "DebugFireMessage", "float");
 	self.debugFireMessageHandler = GameplayNotificationBus.Connect(self, self.debugFireMessageEventId);
-    self.aimingParam = AnimGraphComponentRequestBus.Event.FindParameterIndex(self.entityId, "Aiming");
-    self.targetPosParam = AnimGraphComponentRequestBus.Event.FindParameterIndex(self.entityId, "TargetPos");
-    self.animWeightSpine1Param = AnimGraphComponentRequestBus.Event.FindParameterIndex(self.entityId, "AnimWeightSpine1");
-    AnimGraphComponentRequestBus.Event.SetParameterFloat(self.entityId, self.animWeightSpine1Param, self.Properties.Weapons.AimWeightSpine1);
-    self.animWeightSpine2Param = AnimGraphComponentRequestBus.Event.FindParameterIndex(self.entityId, "AnimWeightSpine2");
-    AnimGraphComponentRequestBus.Event.SetParameterFloat(self.entityId, self.animWeightSpine2Param, self.Properties.Weapons.AimWeightSpine2);
-    self.animWeightSpine3Param = AnimGraphComponentRequestBus.Event.FindParameterIndex(self.entityId, "AnimWeightSpine3");
-    AnimGraphComponentRequestBus.Event.SetParameterFloat(self.entityId, self.animWeightSpine3Param, self.Properties.Weapons.AimWeightSpine3);
-    self.animWeightShoulderParam = AnimGraphComponentRequestBus.Event.FindParameterIndex(self.entityId, "AimWeightShoulder");
-    AnimGraphComponentRequestBus.Event.SetParameterFloat(self.entityId, self.animWeightShoulderParam, self.Properties.Weapons.AimWeightShoulder);
-    self.animWeightUpperArmParam = AnimGraphComponentRequestBus.Event.FindParameterIndex(self.entityId, "AimWeightUpperArm");
-    AnimGraphComponentRequestBus.Event.SetParameterFloat(self.entityId, self.animWeightUpperArmParam, self.Properties.Weapons.AimWeightUpperArm);
-    self.animWeightLowerArmParam = AnimGraphComponentRequestBus.Event.FindParameterIndex(self.entityId, "AimWeightLowerArm");
-    AnimGraphComponentRequestBus.Event.SetParameterFloat(self.entityId, self.animWeightLowerArmParam, self.Properties.Weapons.AimWeightLowerArm);
-    self.animWeightHandParam = AnimGraphComponentRequestBus.Event.FindParameterIndex(self.entityId, "AimWeightHand");
-    AnimGraphComponentRequestBus.Event.SetParameterFloat(self.entityId, self.animWeightHandParam, self.Properties.Weapons.AimWeightHand);
-    self.animWeightNeckParam = AnimGraphComponentRequestBus.Event.FindParameterIndex(self.entityId, "AimWeightNeck");
-    AnimGraphComponentRequestBus.Event.SetParameterFloat(self.entityId, self.animWeightNeckParam, self.Properties.Weapons.AimWeightNeck);
-    self.animWeightHeadParam = AnimGraphComponentRequestBus.Event.FindParameterIndex(self.entityId, "AimWeightHead");
-    AnimGraphComponentRequestBus.Event.SetParameterFloat(self.entityId, self.animWeightHeadParam, self.Properties.Weapons.AimWeightHead);
-    self.shotParam = AnimGraphComponentRequestBus.Event.FindParameterIndex(self.entityId, "Shot");
+
+   
 	self.previousShot = false;
 	self.shot = false;
+
+	-- Pitch angle and target vector
+	self.pitchAngle = 0.0;
+    AnimGraphComponentRequestBus.Event.SetNamedParameterFloat(self.entityId, "TargetPitchAngle", self.pitchAngle);
+	self.targetVector = Vector3(0,0,0);
+	
+	-- Notify calculated target position
+	self.setTargetPosId = GameplayNotificationId(self.entityId, "SetTargetPos", "float");
 end
 
 function weaponcontroller:OnDeactivate()
@@ -551,10 +519,27 @@ function weaponcontroller:UpdateAim()
 			GameplayNotificationBus.Event.OnEventBegin(self.SetWeaponStatusEventId, value);
 		--end
 		if(self.animParamUpdateFlags.TargetPos.update == true) then
-    		AnimGraphComponentRequestBus.Event.SetParameterVector3(self.entityId, self.targetPosParam, target);
+    		AnimGraphComponentRequestBus.Event.SetNamedParameterVector3(self.entityId, "TargetPos", target);
+			GameplayNotificationBus.Event.OnEventBegin(self.setTargetPosId, target);
+
+			-- Calculate the pitch angle based on the target position
+			local playerTm = TransformBus.Event.GetWorldTM(self.entityId);
+			local targetPlayerSpace = playerTm:GetInverseFull()*target;
+			targetPlayerSpace.z = 0;
+			targetPlayerSpace:Normalize();
+			
+			local shoulderPostion = Vector3(0,0,1.5);
+			targetPlayerSpace = playerTm:GetInverseFull()*target;
+			local shoulderToTarget = targetPlayerSpace - shoulderPostion;
+			shoulderToTarget.x = 0;
+			shoulderToTarget:Normalize();
+			pitchAngle = Math.RadToDeg(Math.ArcCos(Vector3(0,1,0):Dot(shoulderToTarget)))
+			pitchAngle = pitchAngle * Math.Sign(shoulderToTarget.z);
+							
+			AnimGraphComponentRequestBus.Event.SetNamedParameterFloat(self.entityId, "TargetPitchAngle", pitchAngle);
 		end
 	
-		-- player always fires directly at reticule, even if AimIK cannot point the weapon that way
+		-- player always fires directly at reticule
 		local canHitTarget = self.isPlayerWeapon or self:CheckCanHitTarget(target);
 		local useWeaponForwardForAiming = 1.0;
 		if(canHitTarget == true) then
@@ -593,23 +578,14 @@ function weaponcontroller:WeaponFireFail(value)
 
 end
 
-function weaponcontroller:UpdateAiming(deltaTime)
-	-- These AimIK settings need to be set here everyframe because of a late initialisation
-	-- issue with the AimIKComponent which means putting them in 'OnActivate()' or the first
-	-- 'OnTick()' is too early and they don't get registered for dynamic slices.
-	AimIKComponentRequestBus.Event.SetAimIKLayer(self.entityId, 3);
-	AimIKComponentRequestBus.Event.SetAimIKPolarCoordinatesMaxRadiansPerSecond(self.entityId, Vector2(24.0, 24.0));
-	AimIKComponentRequestBus.Event.SetAimIKPolarCoordinatesSmoothTimeSeconds(self.entityId, 0.0);
-	AimIKComponentRequestBus.Event.SetAimIKFadeOutTime(self.entityId, self.Properties.Weapons.EndAimingLerpTime);
-	AimIKComponentRequestBus.Event.SetAimIKFadeInTime(self.entityId, self.Properties.Weapons.BeginAimingLerpTime);
-	
+function weaponcontroller:UpdateAiming(deltaTime)	
 	-- The player needs to update aiming every frame (for the crosshair) but A.I. only need
 	-- to update when they want to shoot.
 	if (self.isAiming or self.isPlayerWeapon) then
 		self:UpdateAim();
 	end
 	if(self.animParamUpdateFlags.Aiming.update == true) then
-	    AnimGraphComponentRequestBus.Event.SetParameterFloat(self.entityId, self.aimingParam, self.shootingParamValue);
+	     AnimGraphComponentRequestBus.Event.SetNamedParameterFloat(self.entityId, "Aiming", self.shootingParamValue);
 	end
 end
 
@@ -632,7 +608,7 @@ function weaponcontroller:OnTick(deltaTime, timePoint)
 		self.shot = false;
 	end
 	if(self.animParamUpdateFlags.Shot.update == true) then
-   		AnimGraphComponentRequestBus.Event.SetParameterBool(self.entityId, self.shotParam, self.shot);
+   		AnimGraphComponentRequestBus.Event.SetNamedParameterBool(self.entityId, "Shot", self.shot);
 	end
 	self.previousShot = self.shot;
 end

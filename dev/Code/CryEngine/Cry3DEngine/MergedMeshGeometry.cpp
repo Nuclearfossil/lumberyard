@@ -417,7 +417,6 @@ static inline size_t CullInstanceList(
     SMMRMInstanceContext& context, SMMRMVisibleChunk* visChunks,
     const Vec3& origin, const Vec3& rotationOrigin, float zRotation)
 {
-    MEMORY_SCOPE_CHECK_HEAP();
     size_t numSamplesVisible = 0u;
     const float maxViewDistSq = context.maxViewDistSq;
     const float lodRatioSq = context.lodRatioSq;
@@ -427,7 +426,9 @@ static inline size_t CullInstanceList(
     const int cullFrustum = context.flags & MMRM_CULL_FRUSTUM;
     const int cullDistance = context.flags & MMRM_CULL_DISTANCE;
     const int cullLod = context.flags & MMRM_CULL_LOD;
-    const int forceLod = (context.flags >> MMRM_LOD_SHIFT) & 3;
+    const int forceLod = (context.flags >> MMRM_LOD_SHIFT) & MMRM_LOD_MASK;
+    // The sample reduction uses the top bit from the LOD, so LOD indexes 4 and 5
+    // will automatically have sample reduction applied
     const int sampleReduction = context.flags >> MMRM_SAMPLE_REDUCTION_SHIFT;
     const float sampleOffset = 1.0f + (float) sampleReduction;
     const float fExtents = c_MergedMeshesExtent;
@@ -3529,7 +3530,6 @@ static void MergeInstanceList(SMMRMInstanceContext& context)
     AZ_PROFILE_FUNCTION(AZ::Debug::ProfileCategory::ThreeDEngine);
 
     using namespace NVMath;
-    MEMORY_SCOPE_CHECK_HEAP();
     SMMRMGeometry* geom = context.geom;
     SMMRMUpdateContext* update = context.update;
     SMMRMSpineVtxBase* spines = context.use_spines ? context.spines : NULL;
@@ -4272,7 +4272,6 @@ static void MergeInstanceList(SMMRMInstanceContext& context)
 
 static inline void MergeInstanceListDeform(SMMRMInstanceContext& context)
 {
-    MEMORY_SCOPE_CHECK_HEAP();
     SMMRMGeometry* geom = context.geom;
     SMMRMUpdateContext* update = context.update;
     SMMRMDeformVertex* deform_vertices = context.deform;
@@ -4502,7 +4501,6 @@ static inline void MergeInstanceListDeform(SMMRMInstanceContext& context)
 ////////////////////////////////////////////////////////////////////////////////
 void SMMRMGroupHeader::CullInstances(CCamera* cam, Vec3* origin, Vec3* rotationOrigin, float zRotation, int flags)
 {
-    MEMORY_SCOPE_CHECK_HEAP();
     MMRM_PROFILE_FUNCTION(gEnv->pSystem, PROFILE_3DENGINE);
     AZ_PROFILE_FUNCTION(AZ::Debug::ProfileCategory::ThreeDEngine);
 
@@ -4559,7 +4557,6 @@ void SMMRMUpdateContext::MergeInstanceMeshesSpines(
     , int flags)
 {
     AZ_TRACE_METHOD();
-    MEMORY_SCOPE_CHECK_HEAP();
     SMMRMUpdateContext* update = this;
     const SMMRMGroupHeader* header = update->group;
     size_t j = 0;
@@ -4624,7 +4621,6 @@ void SMMRMUpdateContext::MergeInstanceMeshesDeform(
     AZ_TRACE_METHOD();
     mmrm_printf("deform begin\n");
 
-    MEMORY_SCOPE_CHECK_HEAP();
     FUNCTION_PROFILER_LEGACYONLY(gEnv->pSystem, PROFILE_3DENGINE);
 
     SMMRMUpdateContext* update = this;

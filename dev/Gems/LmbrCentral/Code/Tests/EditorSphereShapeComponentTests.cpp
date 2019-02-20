@@ -10,10 +10,8 @@
 *
 */
 #include "LmbrCentral_precompiled.h"
-#include "LmbrCentralEditor.h"
 #include "LmbrCentralReflectionTest.h"
 #include "Shape/EditorSphereShapeComponent.h"
-#include <AzToolsFramework/Application/ToolsApplication.h>
 
 namespace LmbrCentral
 {
@@ -33,25 +31,10 @@ namespace LmbrCentral
     </ObjectStream>)DELIMITER";
 
     class LoadEditorSphereShapeComponentFromVersion1
-        : public LoadReflectedObjectTest<AZ::ComponentApplication, LmbrCentralEditorModule, EditorSphereShapeComponent>
+        : public LoadEditorComponentTest<EditorSphereShapeComponent>
     {
     protected:
         const char* GetSourceDataBuffer() const override { return kEditorSphereComponentVersion1; }
-
-        void SetUp() override
-        {
-            LoadReflectedObjectTest::SetUp();
-
-            if (m_object)
-            {
-                m_editorSphereShapeComponent = m_object.get();
-                m_SphereShapeConfig = m_editorSphereShapeComponent->GetConfiguration();
-            }
-        }
-
-        EditorSphereShapeComponent* m_editorSphereShapeComponent = nullptr;
-        SphereShapeConfig m_SphereShapeConfig;
-
     };
 
     TEST_F(LoadEditorSphereShapeComponentFromVersion1, Application_IsRunning)
@@ -66,12 +49,16 @@ namespace LmbrCentral
 
     TEST_F(LoadEditorSphereShapeComponentFromVersion1, EditorComponent_Found)
     {
-        EXPECT_NE(m_editorSphereShapeComponent, nullptr);
+        EXPECT_EQ(m_entity->GetComponents().size(), 2);
+        EXPECT_NE(m_entity->FindComponent(m_object->GetId()), nullptr);
     }
 
     TEST_F(LoadEditorSphereShapeComponentFromVersion1, Radius_MatchesSourceData)
     {
-        EXPECT_FLOAT_EQ(m_SphereShapeConfig.m_radius, 0.57f);
+        float radius = 0.0f;
+        SphereShapeComponentRequestsBus::EventResult(
+            radius, m_entity->GetId(), &SphereShapeComponentRequests::GetRadius);
+
+        EXPECT_FLOAT_EQ(radius, 0.57f);
     }
 }
-

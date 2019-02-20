@@ -168,7 +168,7 @@ namespace
 
             lightParams.ReleaseCubemaps();
 
-            const AZStd::string& specularMap = configuration.m_probeCubemap;
+            const AZStd::string& specularMap = configuration.m_probeCubemap.GetAssetPath();
 
             if (!specularMap.empty())
             {
@@ -262,7 +262,7 @@ namespace
             {
                 IOpticsElementBase* flare = gEnv->pOpticsManager->GetOptics(lensOpticsID);
                 lightParams.SetLensOpticsElement(flare);
-                lightParams.SetOpticsParams({ configuration.m_brightness, configuration.m_size, { color.r, color.g, color.b }, true });
+                lightParams.SetOpticsParams({ configuration.m_brightness, configuration.m_size, { color.r, color.g, color.b, color.a }, true });
             }
             else
             {

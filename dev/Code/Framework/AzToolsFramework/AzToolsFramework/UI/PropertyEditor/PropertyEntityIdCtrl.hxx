@@ -32,12 +32,14 @@ class QPushButton;
 namespace AzToolsFramework
 {
     class EntityIdQLabel;
+    class EditorEntityIdContainer;
 
     //just a test to see how it would work to pop a dialog
 
     class PropertyEntityIdCtrl
         : public QWidget
         , private EditorPickModeRequests::Bus::Handler
+        , private AzToolsFramework::EditorEvents::Bus::Handler
     {
         Q_OBJECT
     public:
@@ -52,6 +54,8 @@ namespace AzToolsFramework
         QWidget* GetLastInTabOrder();
         void UpdateTabOrder();
 
+        bool SetChildWidgetsProperty(const char* name, const QVariant& variant);
+
         // QT overrides
         virtual void dragEnterEvent(QDragEnterEvent* event) override;
         virtual void dropEvent(QDropEvent* event) override;
@@ -60,8 +64,12 @@ namespace AzToolsFramework
         //////////////////////////////////////////////////////////////////////////
         // EditorPickModeRequests::Bus::Handler
         void StopObjectPickMode() override;
-        void OnPickModeSelect(AZ::EntityId /*id*/) override;
+        void OnPickModeSelect(AZ::EntityId /*id*/) override;        
         //////////////////////////////////////////////////////////////////////////
+
+        // AzToolsFramework::EditorEvents::Bus::Handler
+        void OnEscape() override;
+        ////
 
         void SetRequiredServices(const AZStd::vector<AZ::ComponentServiceType>& requiredServices);
         void SetIncompatibleServices(const AZStd::vector<AZ::ComponentServiceType>& incompatibleServices);
@@ -79,9 +87,10 @@ namespace AzToolsFramework
         void SetCurrentEntityId(const AZ::EntityId& newEntityId, bool emitChange, const AZStd::string& nameOverride);
 
     protected:
-        bool IsCorrectMimeData(const QMimeData* data) const;
-        AZ::EntityId EntityIdFromMimeData(const QMimeData &data) const;
+        bool IsCorrectMimeData(const QMimeData* mimeData) const;
+        bool EntityIdsFromMimeData(const QMimeData &mimeData, AzToolsFramework::EditorEntityIdContainer* entityIdListContainer = nullptr) const;
         void InitObjectPickMode();
+        void CancelObjectPickMode();
 
         QString BuildTooltip();
 

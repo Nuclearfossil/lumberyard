@@ -22,7 +22,6 @@
 #include "Prefabs/PrefabEvents.h"
 #include <AzCore/EBus/EBus.h>
 
-#include <AzCore/EBus/EBus.h>
 #include <MathConversion.h>
 #include <AzCore/Component/Entity.h>
 #include <AzCore/Component/ComponentApplicationBus.h>
@@ -472,7 +471,7 @@ void CFlowNode::Serialize(XmlNodeRef& node, bool bLoading, CObjectArchive* ar)
                                 "Variable %s -> %s successfully resolved.",
                                 name.data(),
                                 sVarName,
-                                pVar->GetName());
+                                pVar->GetName().toUtf8().constData());
                             CryLogAlways(" --> To get rid of this warning re-save flowgraph!");
                         }
                         else

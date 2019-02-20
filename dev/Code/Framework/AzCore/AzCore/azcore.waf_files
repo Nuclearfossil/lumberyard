@@ -8,7 +8,9 @@
             "Docs.h",
             "PlatformDef.h",
             "PlatformRestrictedFileDef.h",
-            "PlatformIncl.h"
+            "PlatformIncl.h",
+            "AzCoreModule.h",
+            "AzCoreModule.cpp"
         ],
         "Asset":
         [
@@ -21,7 +23,13 @@
             "Asset/AssetManagerComponent.h",
             "Asset/AssetSerializer.cpp",
             "Asset/AssetSerializer.h",
-            "Asset/AssetTypeInfoBus.h"
+            "Asset/AssetTypeInfoBus.h",
+            "Asset/LegacyAssetHandler.h"
+        ],
+        "Asset/AssetInternal":
+        [
+            "Asset/AssetInternal/LegacyBlockingAssetTypeManager.cpp",
+            "Asset/AssetInternal/LegacyBlockingAssetTypeManager.h"
         ],
         "Casting":
         [
@@ -37,6 +45,7 @@
             "Component/ComponentApplicationBus.h",
             "Component/ComponentBus.cpp",
             "Component/ComponentBus.h",
+            "Component/ComponentExport.h",
             "Component/Entity.cpp",
             "Component/Entity.h",
             "Component/EntityBus.h",
@@ -279,6 +288,7 @@
             "Memory/AllocatorBase.h",
             "Memory/AllocatorManager.cpp",
             "Memory/AllocatorManager.h",
+            "Memory/AllocatorScope.h",
             "Memory/BestFitExternalMapAllocator.cpp",
             "Memory/BestFitExternalMapAllocator.h",
             "Memory/BestFitExternalMapSchema.cpp",
@@ -287,6 +297,8 @@
             "Memory/HeapSchema.h",
             "Memory/HphaSchema.cpp",
             "Memory/HphaSchema.h",
+            "Memory/MallocSchema.cpp",
+            "Memory/MallocSchema.h",
             "Memory/Memory.cpp",
             "Memory/Memory.h",
             "Memory/MemoryComponent.cpp",
@@ -295,6 +307,7 @@
             "Memory/MemoryDriller.h",
             "Memory/MemoryDrillerBus.h",
             "Memory/nedmalloc.inl",
+            "Memory/NewAndDelete.inl",
             "Memory/OSAllocator.cpp",
             "Memory/OSAllocator.h",
             "Memory/PoolAllocator.cpp",
@@ -385,6 +398,7 @@
             "Serialization/DynamicSerializableField.h",
             "Serialization/EditContext.cpp",
             "Serialization/EditContext.h",
+            "Serialization/EditContext.inl",
             "Serialization/EditContextConstants.inl",
             "Serialization/IdUtils.inl",
             "Serialization/IdUtils.h",
@@ -406,7 +420,8 @@
         ],
         "UnitTest":
         [
-            "UnitTest/UnitTest.h"
+            "UnitTest/UnitTest.h",
+            "UnitTest/TestTypes.h"
         ],
         "UserSettings":
         [

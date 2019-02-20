@@ -15,7 +15,7 @@
 #include "CryZlib.h"
 #include "ZLibCompressor.h"
 #include "TypeInfo_impl.h"
-#include <md5/md5.h>
+#include <md5.h>
 
 // keep these in sync with the enums in IZLibCompressor.h
 static const int k_stratMap[] = {Z_DEFAULT_STRATEGY, Z_FILTERED, Z_HUFFMAN_ONLY, Z_RLE};
@@ -210,7 +210,7 @@ voidpf CZLibDeflateStream::ZAlloc(
 
     int     size = inItems * inSize;
 
-    int* ptr = (int*) malloc(sizeof(int) + size);
+    int* ptr = (int*) CryModuleMalloc(sizeof(int) + size);
     if (ptr)
     {
         *ptr = inItems * inSize;
@@ -235,7 +235,7 @@ void CZLibDeflateStream::ZFree(
     {
         CZLibDeflateStream* pStr = reinterpret_cast<CZLibDeflateStream*>(pInOpaque);
         pStr->m_zSize -= pPtr[-1];
-        free(pPtr - 1);
+        CryModuleFree(pPtr - 1);
     }
 }
 

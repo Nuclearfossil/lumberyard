@@ -265,6 +265,10 @@ namespace LmbrCentral
             incompatible.push_back(AZ_CRC("PhysicsService", 0xa7350d22));
             incompatible.push_back(AZ_CRC("CharacterPhysicsService", 0x3cd4f075));
         }
+        static void GetDependentServices(AZ::ComponentDescriptor::DependencyArrayType& dependent)
+        {
+            AZ_UNUSED(dependent);
+        }
 
         static void GetRequiredServices(AZ::ComponentDescriptor::DependencyArrayType& required)
         {
@@ -333,7 +337,7 @@ namespace LmbrCentral
 
         //////////////////////////////////////////////////////////////////////////
         // Non reflected data
-        IPhysicalEntity* m_physicalEntity = nullptr;
+        AZStd::shared_ptr<IPhysicalEntity> m_physicalEntity;
         bool m_isApplyingPhysicsToEntityTransform = false;
         SProximityElement* m_proximityTriggerProxy = nullptr;
         AZ::Transform m_previousEntityTransform = AZ::Transform::CreateIdentity();

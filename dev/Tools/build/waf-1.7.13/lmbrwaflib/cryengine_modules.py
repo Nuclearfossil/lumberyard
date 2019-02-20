@@ -13,17 +13,16 @@
 from waflib.Configure import conf
 from waflib.TaskGen import feature, before_method, after_method
 from waflib import Utils, Logs, Errors, Task, Node
-import os, stat, errno
 from os import stat
 from cry_utils import append_kw_entry, append_to_unique_list, sanitize_kw_input_lists, clean_duplicates_in_list, prepend_kw_entry, get_configuration, get_output_folder_name, flatten_list
 from copy_tasks import should_overwrite_file,fast_copy2
-import re
 from collections import defaultdict
 from waf_branch_spec import CONFIGURATIONS, CONFIGURATION_SHORTCUT_ALIASES
 from branch_spec import PLATFORM_SHORTCUT_ALIASES
-import json
 from third_party import is_third_party_uselib_configured, get_third_party_platform_name, get_third_party_configuration_name
 from gems import Gem
+import os, stat, errno, json, re, threading
+from runpy import run_path
 
 COMMON_INPUTS = [
     'additional_settings',
@@ -67,13 +66,17 @@ SANITIZE_INPUTS = COMMON_INPUTS + ['output_file_name', 'files', 'winres_includes
 
 
 def get_all_supported_platforms(ctx):
-    all_supported_platforms = []
+    try:
+        return ctx.all_supported_platforms
+    except AttributeError:
+        all_supported_platforms = []
 
-    for platform in ctx.get_supported_platforms():
-        platform_variants = ctx.get_platform_list(platform)
-        append_to_unique_list(all_supported_platforms, platform_variants)
+        for platform in ctx.get_supported_platforms():
+            platform_variants = ctx.get_platform_list(platform)
+            append_to_unique_list(all_supported_platforms, platform_variants)
 
-    return all_supported_platforms
+        ctx.all_supported_platforms = all_supported_platforms
+        return ctx.all_supported_platforms
 
 def AddGlobalKeywords(ctx, kw):
     """
@@ -83,9 +86,9 @@ def AddGlobalKeywords(ctx, kw):
     WSCRIPT it might be far better to just add it here so you can remove it here in the future all in one place.
     """
     append_kw_entry(kw, 'debug_all_defines', ['AZ_DEBUG_BUILD']) # enable iterator checking etc in debug
-    
+
     # in profile (but not release) enable trace output and debug tools like Debug-Break and IsBeingDebugged etc
-    append_kw_entry(kw, 'profile_all_defines', ['AZ_ENABLE_TRACING', 'AZ_ENABLE_DEBUG_TOOLS']) 
+    append_kw_entry(kw, 'profile_all_defines', ['AZ_ENABLE_TRACING', 'AZ_ENABLE_DEBUG_TOOLS'])
 
 @conf
 def get_platform_list(self, platform):
@@ -138,7 +141,7 @@ def is_mac_platform(self, platform):
 @conf
 def is_android_platform(self, platform):
     '''Safely checks to see if a platform is an explicit android platform. Returns true if it is, otherwise false'''
-    if isinstance(platform, str): 
+    if isinstance(platform, str):
         return platform.startswith('android')
     return False
 
@@ -214,25 +217,40 @@ def SetupRunTimeLibraries(ctx, kw, overwrite_settings = None):
         ctx.fatal('Invalid Settings: "%s" for runtime_crt' % runtime_crt )
 
     crt_flag = []
-    config = get_configuration(ctx, kw['target'])
+    link_flag = []
+
+    is_debug = 'debug' in get_configuration(ctx, kw['target'])
+    is_msvc = ctx.env['CC_NAME'] == 'msvc'
+    is_clang_windows = 'win_x64_clang' == ctx.env['PLATFORM']
 
     if runtime_crt == 'static':
-        append_kw_entry(kw,'defines',['_MT'])
-        if ctx.env['CC_NAME'] == 'msvc':
-            if 'debug' in config:
-                crt_flag = [ '/MTd' ]
+        append_kw_entry(kw, 'defines', ['_MT'])
+        if is_msvc:
+            if is_debug:
+                crt_flag = ['/MTd']
             else:
-                crt_flag    = [ '/MT' ]
+                crt_flag = ['/MT']
+        elif is_clang_windows:
+            if is_debug:
+                link_flag = ['/DEFAULTLIB:libcmtd']
+            else:
+                link_flag = ['/DEFAULTLIB:libcmt']
     else: # runtime_crt == 'dynamic':
-        append_kw_entry(kw,'defines',[ '_MT', '_DLL' ])
-        if ctx.env['CC_NAME'] == 'msvc':
-            if 'debug' in config:
-                crt_flag = [ '/MDd' ]
+        append_kw_entry(kw, 'defines', ['_MT', '_DLL'])
+        if is_msvc:
+            if is_debug:
+                crt_flag = ['/MDd']
             else:
-                crt_flag    = [ '/MD' ]
+                crt_flag = ['/MD']
+        elif is_clang_windows:
+            if is_debug:
+                link_flag = ['/DEFAULTLIB:msvcrtd']
+            else:
+                link_flag = ['/DEFAULTLIB:msvcrt']
 
-    append_kw_entry(kw,'cflags',crt_flag)
-    append_kw_entry(kw,'cxxflags',crt_flag)
+    append_kw_entry(kw, 'cflags', crt_flag)
+    append_kw_entry(kw, 'cxxflags', crt_flag)
+    append_kw_entry(kw, 'linkflags', link_flag)
 
 
 def TrackFileListChanges(ctx, kw):
@@ -403,7 +421,10 @@ def LoadFileLists(ctx, kw, file_lists):
                         file_node = ctx.engine_node.make_node(file_entry[len('@ENGINE@'):])
                         file = file_node.abspath()
                     else:
-                        file_node = ctx.path.make_node(file_entry)
+                        if os.path.isabs(file_entry):
+                            file_node = ctx.root.make_node(file_entry)
+                        else:
+                            file_node = ctx.path.make_node(file_entry)
                         file = file_entry
 
                     filenode_abs_path = file_node.abspath()
@@ -418,7 +439,7 @@ def LoadFileLists(ctx, kw, file_lists):
                     task_generator_files.add(filenode_abs_path)
 
                     # Collect per file information
-                    if file == pch_file:
+                    if file == pch_node.abspath():
                         # PCHs are not compiled with the normal compilation, hence don't collect them
                         found_pch = True
 
@@ -466,9 +487,7 @@ def LoadFileLists(ctx, kw, file_lists):
         kw['source'] = uber_files | source_files | qt_source_files | objc_source_files | header_files | resource_files | other_files
         kw['mac_plist'] = list(plist_files)
         if len(plist_files) != 0:
-            if 'darwin' in ctx.cmd or 'mac' in ctx.cmd:
-                kw['mac_app'] = True
-            elif 'appletv' in ctx.cmd:
+            if 'appletv' in ctx.cmd:
                 kw['appletv_app'] = True
             else:
                 kw['ios_app'] = True
@@ -498,9 +517,7 @@ def LoadFileLists(ctx, kw, file_lists):
             kw['source'].extend(sorted(objc_source_files, key=lambda file: file.abspath()))
             kw['mac_plist'] = list(sorted(plist_files, key=lambda file:file.abspath()))
             if len(plist_files) != 0:
-                if 'darwin' in ctx.cmd or 'mac' in ctx.cmd:
-                    kw['mac_app'] = True
-                elif 'appletv' in ctx.cmd:
+                if 'appletv' in ctx.cmd:
                     kw['appletv_app'] = True
                 else:
                     kw['ios_app'] = True
@@ -562,7 +579,7 @@ def VerifyInput(ctx, kw):
             current_platform, current_configuration = ctx.get_platform_and_configuration()
 
             # Special case: If the platform is win_x64, reduce it to win
-            if current_platform == 'win_x64' or current_platform == 'win_x64_vs2015' or current_platform == 'win_x64_vs2013':
+            if current_platform in ('win_x64', 'win_x64_vs2017', 'win_x64_vs2015', 'win_x64_vs2013'):
                 current_platform = 'win'
 
             # Search for the keywords in 'path_check_key_values'
@@ -614,8 +631,15 @@ def AppendCommonModules(ctx,kw):
         kw['use'] = []
 
     # Append common module's dependencies
-    if any(p == ctx.env['PLATFORM'] for p in ('win_x86', 'win_x64', 'win_x64_vs2015', 'win_x64_vs2013', 'durango')): # ACCEPTED_USE
-        common_modules_dependencies = ['bcrypt']
+    if any(p == ctx.env['PLATFORM'] for p in (
+        'win_x86',
+        'win_x64',
+        'win_x64_clang',
+        'win_x64_vs2017',
+        'win_x64_vs2015',
+        'win_x64_vs2013',
+        )):
+            common_modules_dependencies = ['bcrypt']
 
     if 'test' in ctx.env['CONFIGURATION'] or 'project_generator' == ctx.env['PLATFORM']:
         append_to_unique_list(kw['use'], 'AzTest')
@@ -663,6 +687,8 @@ def LoadAdditionalFileSettings(ctx, kw):
         for file in file_list:
             if isinstance(file, Node.Node):
                 file_abspath = file.abspath()
+            elif os.path.isabs(file):
+                file_abspath = file
             else:
                 file_abspath = ctx.path.make_node(file).abspath()
 
@@ -692,6 +718,33 @@ def ConfigureTaskGenerator(ctx, kw):
     # Ensure we have a name for lookup purposes
     if 'name' not in kw:
         kw['name'] = target
+
+    # Deal with restricted platforms
+    for p in ctx.env['RESTRICTED_PLATFORMS']:
+        restricted_filelist_kw = '{}_file_list'.format(p)
+
+        # Unless the caller has overridden, look to see if we can automatically attach any waf_files for the platform
+        if restricted_filelist_kw not in kw:
+            waf_file = os.path.join(p, '{0}_{1}.waf_files'.format(target.lower(), p))
+            script_dir = os.path.dirname(ctx.cur_script.abspath())
+            if os.path.exists(os.path.join(script_dir, waf_file)):
+                append_kw_entry(kw, restricted_filelist_kw, waf_file)
+
+        # If a restricted script is specified, try and open a platform-specific version of the base calling script
+        if 'restricted_script' in kw:
+            script_dir, script_base = os.path.split(ctx.cur_script.abspath())
+            script_root, script_ext = os.path.splitext(script_base)
+            restricted_script_filename = ''
+            if len(script_ext) > 0:
+                restricted_script_filename = os.path.join(script_dir, p, '{0}_{1}.{2}'.format(script_root, p, script_ext))
+            else:
+                restricted_script_filename = os.path.join(script_dir, p, '{0}_{1}'.format(script_root, p))
+            if os.path.exists(restricted_script_filename):
+
+                # Open the script and look for the specific function name passed in. If we find it, call it with our parameters
+                restricted_script = run_path(restricted_script_filename)
+                if kw['restricted_script'] in restricted_script:
+                    restricted_script[kw['restricted_script']](ctx, kw)
 
     # Provide the module name to the test framework.
     if 'test' in ctx.env['CONFIGURATION'] and not ctx.is_mac_platform(ctx.env['PLATFORM']):
@@ -743,7 +796,7 @@ def ConfigureTaskGenerator(ctx, kw):
                 if not uselib_name in processed_dependencies and not uselib_name in kw.get('no_inherit_config', []):
                     ctx.append_dependency_configuration_settings(uselib_name, kw)
                     processed_dependencies.append(uselib_name)
-                    
+
     # Make sure we have a 'use' list
     if not kw.get('use', None):
         kw['use'] = []
@@ -803,6 +856,8 @@ def ConfigureTaskGenerator(ctx, kw):
     if len(kw['copyright_org'])==0:
         kw['copyright_org'] = ['Amazon']
 
+    if ctx.is_monolithic_build():
+        append_kw_entry(kw, 'defines',[ '_LIB', 'AZ_MONOLITHIC_BUILD' ])
 
 def RunTaskGenerator(ctx, build_type, *k, **kw ):
 
@@ -1075,16 +1130,12 @@ def MonolithicBuildModule(ctx, *k, **kw):
     if 'uselib' in kw:
         _append(prefix + 'uselib',        kw['uselib'] )
 
-    # Adjust own task gen settings
-    append_kw_entry(kw, 'defines',[ '_LIB', 'AZ_MONOLITHIC_BUILD' ])
-
     # Remove rc files from the sources for monolithic builds (only the rc of
     # the launcher will be used) and remove any duplicate files that may have
     # sneaked in as well (using the python idiom: list(set(...)) to do so
     kw['source'] = [file for file in kw['source'] if not file.abspath().endswith('.rc')]
 
     return ctx.objects(*k, **kw)
-
 
 ###############################################################################
 def BuildTaskGenerator(ctx, kw):
@@ -1093,9 +1144,25 @@ def BuildTaskGenerator(ctx, kw):
     Check if this task generator should be build at all in the current configuration
     """
     target = kw['target']
+
+    # Assign a deterministic UID to this target
+    ctx.assign_target_uid(kw)
+
     current_platform = ctx.env['PLATFORM']
     current_configuration = ctx.env['CONFIGURATION']
     if ctx.cmd == 'configure':
+
+        # During the configure process, do an extra check on the module's declared 'use' or 'uselib' to see if it matches
+        # any tagged invalid uselibs that was detected during the 3rd party initialization.
+        if hasattr(ctx,'InvalidUselibs'):
+            declared_uselibs = kw.get('uselib',[]) + kw.get('use',[])
+            illegal_uselib = []
+            for declared_uselib in declared_uselibs:
+                if declared_uselib in ctx.InvalidUselibs:
+                    illegal_uselib.append(declared_uselib)
+            if len(illegal_uselib)>0:
+                Logs.warn("[WARN] Module '{}' may fail to build due to invalid use or uselib dependencies ({})".format(target,','.join(illegal_uselib)))
+
         return False        # Dont build during configure
 
     if ctx.cmd == 'generate_uber_files':
@@ -1109,6 +1176,15 @@ def BuildTaskGenerator(ctx, kw):
             configuration_list=kw.get('configurations', []),
             export_internal_3p_libs=kw.get('export_internal_3rd_party_libs', False),
             target=target)
+        return False
+
+    if ctx.cmd == 'generate_module_dependency_files':  # Command used by Integration Toolkit (ly_integration_toolkit.py)
+        ctx(features='generate_module_dependency_files',
+            use_module_list=kw['use'],
+            platform_list=kw.get('platforms', []),
+            configuration_list=kw.get('configurations', []),
+            target=target,
+            waf_files=kw.get('waf_file_entries', []))
         return False
 
     if current_platform == 'project_generator':
@@ -1179,7 +1255,7 @@ def tg_apply_additional_settings(self):
 def set_cryengine_flags(ctx, kw):
 
     prepend_kw_entry(kw,'includes',['.',
-                                    ctx.CreateRootRelativePath('Code/SDKs/boost'),
+                                    ctx.ThirdPartyPath('boost'),
                                     ctx.CreateRootRelativePath('Code/CryEngine/CryCommon')])
 
 
@@ -1259,7 +1335,7 @@ def CryEngineModule(ctx, *k, **kw):
         if has_resource_h:
             append_kw_entry(kw,'features',['generate_rc_file'])     # Always Generate RC files for Engine DLLs
 
-    if ctx.env['PLATFORM'] == 'darwin_x64' or ctx.env['PLATFORM'] == 'ios' or ctx.env['PLATFORM'] == 'appletv':
+    if ctx.env['PLATFORM'] == 'ios' or ctx.env['PLATFORM'] == 'appletv':
         kw['mac_bundle']        = True                                      # Always create a Mac Bundle on darwin
 
     if ctx.env['PLATFORM'] == 'darwin_x64':
@@ -1330,8 +1406,11 @@ def CryEngineStaticLibrary(ctx, *k, **kw):
     if ctx.cmd == 'generate_uber_files':
         return ctx(features='generate_uber_file', uber_file_list=kw['file_list_content'], target=kw['target'], pch=os.path.basename( kw.get('pch', '') ))
 
+    if (is_monolithic_build(ctx)):
+        append_kw_entry(kw, 'defines',[ 'AZ_MONOLITHIC_BUILD' ])
+        
     append_kw_entry(kw,'features',['c', 'cxx', 'cstlib', 'cxxstlib', 'use'])
-    
+
     return RunTaskGenerator(ctx, 'stlib', *k, **kw)
 
 
@@ -1348,7 +1427,7 @@ def CryEngine3rdPartyStaticLibrary(ctx, *k, **kw):
     apply_cryengine_module_defines(ctx, kw)
 
     SetupRunTimeLibraries(ctx, kw)
-        
+
     LoadSharedSettings(ctx,k,kw)
 
     ConfigureTaskGenerator(ctx, kw)
@@ -1420,7 +1499,7 @@ def codegen_static_modules_cpp_for_launcher(ctx, project, k, kw):
 
     if not is_monolithic_build(ctx):
         return
-        
+
     # Gather modules used by this project
     static_modules = ctx.project_flavor_modules(project, 'Game')
     for gem in ctx.get_game_gems(project):
@@ -1507,45 +1586,42 @@ def CryLauncher_Impl(ctx, project, *k, **kw_per_launcher):
     if not BuildTaskGenerator(ctx, kw_per_launcher):
         return None
 
-    if ctx.is_android_platform(ctx.env['PLATFORM']):
-        if ctx.get_android_settings(project) == None:
-            Logs.warn('[WARN] Game project - %s - not configured for Android.  Skipping...' % ctx.game_project)
-            return None
+    is_android = ctx.is_android_platform(ctx.env['PLATFORM'])
+    is_monolithic = is_monolithic_build(ctx)
+
+    if is_android and not ctx.get_android_settings(project):
+        Logs.warn('[WARN] Game project - %s - not configured for Android.  Skipping...' % ctx.game_project)
+        return None
 
     kw_per_launcher['idx']              = kw_per_launcher['idx'] + (1000 * (ctx.project_idx(project) + 1));
     # Setup values for Launcher Projects
     append_kw_entry(kw_per_launcher,'features',[ 'generate_rc_file' ])
-    kw_per_launcher['is_launcher']          = True
     kw_per_launcher['resource_path']        = ctx.launch_node().make_node(ctx.game_code_folder(project) + '/Resources')
     kw_per_launcher['project_name']         = project
     kw_per_launcher['output_file_name']     = ctx.get_executable_name( project )
 
     Logs.debug("lumberyard: Generating launcher %s from %s" % (kw_per_launcher['output_file_name'], kw_per_launcher['target']))
 
-    # For some odd reason applying the gems to the Android launcher causes a build order issue where
-    # the launcher is built/linked prior to the required gems being built/linked resulting in a missing
-    # node signature error.  I suspect it has to do with being compiled into a library instead of a program.
-    if not ctx.is_android_platform(ctx.env['PLATFORM']):
+    # We can only apply gems to the AndroidLauncher during monolithic builds.  This is due to how the launcher is
+    # loaded at runtime and may not be able to recursively load all "NEEDED" libraries depending on OS version
+    if (not is_android) or (is_android and is_monolithic):
         ctx.apply_gems_to_context(project, k, kw_per_launcher)
 
     codegen_static_modules_cpp_for_launcher(ctx, project, k, kw_per_launcher)
 
-    if 'mac_launcher' in kw_per_launcher:
-        kw_per_launcher['output_sub_folder'] = ctx.get_executable_name( project ) + ".app/Contents/MacOS"
-    elif 'appletv_launcher' in kw_per_launcher:
+    if 'appletv_launcher' in kw_per_launcher:
         kw_per_launcher['output_sub_folder'] = ctx.get_executable_name( project ) + ".app"
     elif 'ios_launcher' in kw_per_launcher:
         kw_per_launcher['output_sub_folder'] = ctx.get_executable_name( project ) + ".app"
 
-    if is_monolithic_build(ctx):
+    if is_monolithic:
         append_kw_entry(kw_per_launcher,'defines',[ '_LIB', 'AZ_MONOLITHIC_BUILD' ])
         append_kw_entry(kw_per_launcher,'features',[ 'apply_monolithic_build_settings' ])
-
-    if not is_monolithic_build(ctx) and 'mac_launcher' in kw_per_launcher:
-    	append_kw_entry(kw_per_launcher, 'features', ['apply_non_monolithic_launcher_settings'])
+    elif 'mac_launcher' in kw_per_launcher:
+        append_kw_entry(kw_per_launcher, 'features', ['apply_non_monolithic_launcher_settings'])
 
     # android doesn't have the concept of native executables so we need to build it as a lib
-    if ctx.is_android_platform(ctx.env['PLATFORM']):
+    if is_android:
         return RunTaskGenerator(ctx, 'shlib', *k, **kw_per_launcher)
     else:
         append_kw_entry(kw_per_launcher,'features', ['copy_3rd_party_binaries'])
@@ -1652,7 +1728,7 @@ def CryConsoleApplication(ctx, *k, **kw):
 
     if ctx.is_windows_platform(ctx.env['PLATFORM']):
         append_kw_entry(kw,'win_linkflags',[ '/SUBSYSTEM:CONSOLE' ])
-        
+
     # Default clang behavior is to disable exceptions. For console apps we want to enable them
     if 'CXXFLAGS' in ctx.env.keys() and 'darwin' in ctx.get_platform_list(ctx.env['PLATFORM']):
         if '-fno-exceptions' in ctx.env['CXXFLAGS']:
@@ -1804,8 +1880,8 @@ def CryEditorLib(ctx, *k, **kw):
     apply_cryengine_module_defines(ctx, kw)
 
     SetupRunTimeLibraries(ctx,kw)
-    append_kw_entry(kw,'win_cxxflags',['/EHsc'])
-    append_kw_entry(kw,'win_cflags', ['/EHsc'])
+    append_kw_entry(kw,'msvc_cxxflags',['/EHsc'])
+    append_kw_entry(kw,'msvc_cflags', ['/EHsc'])
     append_kw_entry(kw,'defines',['USE_MEM_ALLOCATOR', 'EDITOR', 'DONT_BAN_STD_STRING', 'FBXSDK_NEW_API=1' ])
 
     LoadSharedSettings(ctx,k,kw)
@@ -1835,8 +1911,8 @@ def CryEditorCore(ctx, *k, **kw):
 
     SetupRunTimeLibraries(ctx,kw)
 
-    append_kw_entry(kw,'win_cxxflags',['/EHsc'])
-    append_kw_entry(kw,'win_cflags', ['/EHsc'])
+    append_kw_entry(kw,'msvc_cxxflags',['/EHsc'])
+    append_kw_entry(kw,'msvc_cflags', ['/EHsc'])
     append_kw_entry(kw,'defines',['EDITOR_CORE', 'USE_MEM_ALLOCATOR', 'EDITOR', 'DONT_BAN_STD_STRING', 'FBXSDK_NEW_API=1' ])
 
     LoadSharedSettings(ctx,k,kw)
@@ -1870,18 +1946,17 @@ def CryEditorUiQt(ctx, *k, **kw):
 
     SetupRunTimeLibraries(ctx,kw)
 
-    append_kw_entry(kw,'win_cxxflags',['/EHsc'])
-    append_kw_entry(kw,'win_cflags',['/EHsc'])
+    append_kw_entry(kw,'msvc_cxxflags',['/EHsc'])
+    append_kw_entry(kw,'msvc_cflags',['/EHsc'])
     append_kw_entry(kw,'defines',[  'NOMINMAX',
                                     'EDITOR_UI_UX_CHANGE',
                                     'EDITOR_QT_UI_EXPORTS',
                                     'IGNORE_CRY_COMMON_STATIC_VAR',
                                     'CRY_ENABLE_RC_HELPER',
                                     'PLUGIN_EXPORTS',
-                                    'EDITOR_COMMON_IMPORTS',
-                                    'NOT_USE_CRY_MEMORY_MANAGER'])
+                                    'EDITOR_COMMON_IMPORTS'])
 
-    LoadSharedSettings(ctx,k,kw)    
+    LoadSharedSettings(ctx,k,kw)
 
     ConfigureTaskGenerator(ctx, kw)
 
@@ -1912,9 +1987,9 @@ def CryPlugin(ctx, *k, **kw):
 
     SetupRunTimeLibraries(ctx,kw)
 
-    append_kw_entry(kw,'win_cxxflags',['/EHsc'])
-    append_kw_entry(kw,'win_cflags',['/EHsc'])
-    append_kw_entry(kw,'defines',[ 'SANDBOX_IMPORTS', 'PLUGIN_EXPORTS', 'EDITOR_COMMON_IMPORTS', 'NOT_USE_CRY_MEMORY_MANAGER' ])
+    append_kw_entry(kw,'msvc_cxxflags',['/EHsc'])
+    append_kw_entry(kw,'msvc_cflags',['/EHsc'])
+    append_kw_entry(kw,'defines',[ 'SANDBOX_IMPORTS', 'PLUGIN_EXPORTS', 'EDITOR_COMMON_IMPORTS' ])
     kw['output_sub_folder']     = 'EditorPlugins'
     kw['features'] += ['qt5']#added QT to all plugins
 
@@ -1937,15 +2012,15 @@ def BuilderPlugin(ctx, *k, **kw):
     Wrapper for Asset Builder SDK Builders
     """
     kw['output_sub_folder']='Builders'
-    append_kw_entry(kw, 'win_cxxflags', ['/EHsc'])
-    append_kw_entry(kw, 'win_cflags', ['/EHsc'])
+    append_kw_entry(kw, 'msvc_cxxflags', ['/EHsc'])
+    append_kw_entry(kw, 'msvc_cflags', ['/EHsc'])
     append_kw_entry(kw, 'win_defines', ['UNICODE'])
     append_kw_entry(kw, 'use', ['AzToolsFramework', 'AssetBuilderSDK'])
     append_kw_entry(kw, 'uselib', ['QT5CORE', 'QT5GUI', 'QT5WIDGETS'])
     defines = []
-    
+
     append_kw_entry(kw, 'defines', defines)
-    
+
     # Initialize the Task Generator
     InitializeTaskGenerator(ctx, kw)
 
@@ -1988,9 +2063,9 @@ def CryStandAlonePlugin(ctx, *k, **kw):
     ctx.set_editor_flags(kw)
     SetupRunTimeLibraries(ctx,kw)
 
-    append_kw_entry(kw,'win_cxxflags',['/EHsc'])
-    append_kw_entry(kw,'win_cflags',['/EHsc'])
-    append_kw_entry(kw,'defines',[ 'PLUGIN_EXPORTS', 'NOT_USE_CRY_MEMORY_MANAGER' ])
+    append_kw_entry(kw,'msvc_cxxflags',['/EHsc'])
+    append_kw_entry(kw,'msvc_cflags',['/EHsc'])
+    append_kw_entry(kw,'defines',[ 'PLUGIN_EXPORTS' ])
     append_kw_entry(kw,'win_debug_linkflags',['/NODEFAULTLIB:libcmtd.lib', '/NODEFAULTLIB:libcd.lib'])
     append_kw_entry(kw,'win_profile_linkflags',['/NODEFAULTLIB:libcmt.lib', '/NODEFAULTLIB:libc.lib'])
     append_kw_entry(kw,'win_release_linkflags',['/NODEFAULTLIB:libcmt.lib', '/NODEFAULTLIB:libc.lib'])
@@ -2011,6 +2086,8 @@ def CryStandAlonePlugin(ctx, *k, **kw):
 
     if ctx.env['PLATFORM'] == 'darwin_x64':
         append_kw_entry(kw,'linkflags',['-install_name', '@rpath/lib'+kw['output_file_name']+'.dylib'])
+
+    kw['is_editor_plugin'] = True
 
     return RunTaskGenerator(ctx, 'shlib', *k, **kw)
 
@@ -2034,9 +2111,9 @@ def CryPluginModule(ctx, *k, **kw):
 
     SetupRunTimeLibraries(ctx,kw)
 
-    append_kw_entry(kw,'win_cxxflags',['/EHsc'])
-    append_kw_entry(kw,'win_cflags',['/EHsc'])
-    append_kw_entry(kw,'defines',[ 'PLUGIN_EXPORTS', 'EDITOR_COMMON_EXPORTS', 'NOT_USE_CRY_MEMORY_MANAGER' ])
+    append_kw_entry(kw,'msvc_cxxflags',['/EHsc'])
+    append_kw_entry(kw,'msvc_cflags',['/EHsc'])
+    append_kw_entry(kw,'defines',[ 'PLUGIN_EXPORTS', 'EDITOR_COMMON_EXPORTS' ])
     if not 'output_sub_folder' in kw:
         kw['output_sub_folder'] = 'EditorPlugins'
 
@@ -2075,9 +2152,9 @@ def CryEditorCommon(ctx, *k, **kw):
 
     SetupRunTimeLibraries(ctx,kw)
 
-    append_kw_entry(kw,'win_cxxflags',['/EHsc'])
-    append_kw_entry(kw,'win_cflags',['/EHsc'])
-    append_kw_entry(kw,'defines',[ 'PLUGIN_EXPORTS', 'EDITOR_COMMON_EXPORTS', 'NOT_USE_CRY_MEMORY_MANAGER' ])
+    append_kw_entry(kw,'msvc_cxxflags',['/EHsc'])
+    append_kw_entry(kw,'msvc_cflags',['/EHsc'])
+    append_kw_entry(kw,'defines',[ 'PLUGIN_EXPORTS', 'EDITOR_COMMON_EXPORTS'])
 
     LoadSharedSettings(ctx,k,kw)
 
@@ -2129,7 +2206,7 @@ def CryResourceCompiler(ctx, *k, **kw):
         append_kw_entry(kw,'win_ndebug_linkflags',['/NODEFAULTLIB:libcmt.lib', '/NODEFAULTLIB:libc.lib'])
         append_kw_entry(kw,'win_linkflags',[ '/SUBSYSTEM:CONSOLE' ])
 
-    LoadSharedSettings(ctx,k,kw)        
+    LoadSharedSettings(ctx,k,kw)
 
     ConfigureTaskGenerator(ctx, kw)
 
@@ -2167,8 +2244,8 @@ def CryResourceCompilerModule(ctx, *k, **kw):
     if ctx.is_mac_platform(ctx.env['PLATFORM']):
         append_kw_entry(kw,'linkflags',['-dynamiclib'])
 
-    LoadSharedSettings(ctx,k,kw)        
-                
+    LoadSharedSettings(ctx,k,kw)
+
     ConfigureTaskGenerator(ctx, kw)
 
     if not BuildTaskGenerator(ctx, kw):
@@ -2193,7 +2270,7 @@ def CryPipelineModule(ctx, *k, **kw):
     InitializeTaskGenerator(ctx, kw)
 
     AppendCommonModules(ctx,kw)
-    
+
     # Setup TaskGenerator specific settings
     SetupRunTimeLibraries(ctx, kw, 'dynamic')
 
@@ -2309,19 +2386,29 @@ def ApplyBuildOptionSettings(self, kw):
         kw['cxxflags'].extend(self.env['DISASSEMBLY_cxxflags'])
         self.env['CC_TGT_F'] = self.env['DISASSEMBLY_cc_tgt_f']
         self.env['CXX_TGT_F'] = self.env['DISASSEMBLY_cxx_tgt_f']
-    
+
     # Add ASLR and ASAN flags
     is_debug = self.env['CONFIGURATION'] in ('debug', 'debug_test')
     if self.is_option_true('use_asan') or kw.get('use_asan', is_debug):
         kw['cflags'].extend(self.env['ASAN_cflags'])
         kw['cxxflags'].extend(self.env['ASAN_cxxflags'])
-    
+
     if self.is_option_true('use_aslr') or kw.get('use_aslr', False):
         kw['linkflags'].extend(self.env['LINKFLAGS_ASLR'])
 
     # Crash reporter settings
     if self.options.external_crash_reporting:
         kw['defines'] += ['EXTERNAL_CRASH_REPORTING=' + self.options.external_crash_reporting]
+    if self.options.crash_handler_token:
+        kw['defines'] += ['CRASH_HANDLER_TOKEN=' + self.options.crash_handler_token]
+    if self.options.crash_handler_url:
+        kw['defines'] += ['CRASH_HANDLER_URL=' + self.options.crash_handler_url]
+
+    # We always send in a packaged build time. It's only meaningful for packaged builds.
+    packaged_build_time = 0
+    if len(self.options.packaged_build_time) > 0:
+        packaged_build_time = self.options.packaged_build_time
+    kw['defines'] += ['LY_METRICS_BUILD_TIME={}'.format(packaged_build_time)]
 
 ###############################################################################
 # Helper function to extract platform specific flags
@@ -2650,13 +2737,13 @@ def LoadSharedSettings(ctx, k, kw, file_path = None):
     source_folder = file_path
     if not source_folder:
         source_folder = ctx.CreateRootRelativePath('Code/Tools/SharedSettings')
- 
+
     if not source_folder:
         return
 
     for settings_file in shared_list:
         this_file = os.path.join(source_folder, settings_file)
-        
+
         if os.path.exists(this_file):
             source_node = ctx.root.make_node(this_file)
             parsed_json = ctx.parse_json_file(source_node)
@@ -2671,6 +2758,8 @@ def is_building_dedicated_server(ctx):
     if ctx.cmd == 'generate_uber_files':
         return False
     if ctx.cmd == 'generate_module_def_files':
+        return False
+    if ctx.cmd == 'generate_module_dependency_files':
         return False
 
     config = ctx.env['CONFIGURATION']

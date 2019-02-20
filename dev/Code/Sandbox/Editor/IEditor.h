@@ -122,7 +122,11 @@ struct IEditorParticleUtils;  // Leroy@conffx
 struct ILogFile; // Vladimir@conffx
 
 // Qt/QML
+
+#ifdef DEPRECATED_QML_SUPPORT
 class QQmlEngine;
+#endif // #ifdef DEPRECATED_QML_SUPPORT
+
 class QWidget;
 class QMimeData;
 class QString;
@@ -236,8 +240,15 @@ enum EEditorNotifyEvent
     eNotify_OnExportBrushes, // For Designer objects, or objects using the Designer Tool.
 
     eNotify_OnTextureLayerChange,      // Sent when texture layer was added, removed or moved
+
+#ifdef DEPRECATED_QML_SUPPORT
     eNotify_BeforeQMLDestroyed, // called before QML is destroyed so you can kill your resources (if any)
     eNotify_QMLReady, // when QML has been re-initialized - this can happen during runtime if plugins are unloaded and loaded and is your opportunity to register your types.
+#else
+    // QML is deprecated! These are left here so that the enum order doesn't change. Don't use
+    eNotify_BeforeQMLDestroyed_Deprecated,
+    eNotify_QMLReady_Deprecated,
+#endif
 
     eNotify_OnParticleUpdate,          // A particle effect was modified.
     eNotify_OnAddAWSProfile,           // An AWS profile was added
@@ -245,7 +256,11 @@ enum EEditorNotifyEvent
     eNotify_OnSwitchAWSDeployment,     // The AWS deployment was switched
     eNotify_OnFirstAWSUse,             // This should only be emitted once
 
-    eNotify_OnRefCoordSysChange
+    eNotify_OnRefCoordSysChange,
+
+    // Entity selection events.
+    eNotify_OnEntitiesSelected,
+    eNotify_OnEntitiesDeselected
 };
 
 // UI event handler
@@ -523,6 +538,8 @@ struct IEditor
     virtual bool IsModified() = 0;
     //! Save current document.
     virtual bool SaveDocument() = 0;
+    //! Legacy version of WriteToConsole; don't use.
+    virtual void WriteToConsole(const char* string) = 0;
     //! Write the passed string to the editors console
     virtual void WriteToConsole(const QString& string) = 0;
     //! Set value of console variable.
@@ -834,6 +851,8 @@ struct IEditor
     virtual bool FlushUndo(bool isShowMessage = false) = 0;
     //! Clear the last N number of steps in the undo stack
     virtual bool ClearLastUndoSteps(int steps) = 0;
+    //! Clear all current Redo steps in the undo stack
+    virtual bool ClearRedoStack() = 0;
     //! Retrieve current animation context.
     virtual CAnimationContext* GetAnimation() = 0;
     //! Retrieve sequence manager
@@ -907,7 +926,11 @@ struct IEditor
     virtual IAssetBrowser* GetAssetBrowser() = 0; // Vladimir@Conffx
     virtual IImageUtil* GetImageUtil() = 0;  // Vladimir@conffx
     virtual SEditorSettings* GetEditorSettings() = 0;
+
+#ifdef DEPRECATED_QML_SUPPORT
     virtual QQmlEngine* GetQMLEngine() const = 0;
+#endif // #ifdef DEPRECATED_QML_SUPPORT
+
     virtual ILogFile* GetLogFile() = 0;  // Vladimir@conffx
 
     // unload all plugins.  Destroys the QML engine because it has to.

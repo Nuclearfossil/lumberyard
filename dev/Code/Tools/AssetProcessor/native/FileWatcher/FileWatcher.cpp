@@ -11,6 +11,7 @@
 */
 #include "FileWatcher.h"
 #include <AzCore/Debug/Trace.h>
+#include <native/assetprocessor.h>
 
 //////////////////////////////////////////////////////////////////////////////
 /// FolderWatchRoot
@@ -167,12 +168,13 @@ void FileWatcher::StartWatching()
         AZ_Warning("FileWatcher", false, "StartWatching() called when already watching for file changes.");
         return;
     }
-  
+
     for (FolderRootWatch* root : m_folderWatchRoots)
     {
         root->Start();
     }
-    
+
+    AZ_TracePrintf(AssetProcessor::ConsoleChannel, "File Change Monitoring started.\n");
     m_startedWatching = true;
 }
 
@@ -183,12 +185,12 @@ void FileWatcher::StopWatching()
         AZ_Warning("FileWatcher", false, "StartWatching() called when is not watching for file changes.");
         return;
     }
-    
+
     for (FolderRootWatch* root : m_folderWatchRoots)
     {
         root->Stop();
     }
-    
+
     m_startedWatching = false;
 }
 

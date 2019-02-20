@@ -59,6 +59,29 @@ namespace AzToolsFramework
     }
 
     //-----------------------------------------------------------------------------
+
+    bool HasAnyVisibleChildren(const InstanceDataNode& node, bool isSlicePushUI)
+    {
+        // Seed the list.
+        AZStd::list<InstanceDataNode> nodeList(node.GetChildren().begin(), node.GetChildren().end());
+
+        for (auto& child : nodeList)
+        {
+            NodeDisplayVisibility visibility = CalculateNodeDisplayVisibility(child, isSlicePushUI);
+            if (visibility == NodeDisplayVisibility::Visible)
+            {
+                return true;
+            }
+
+            // Queue the rest of the list.
+            // This is creates breadth-first traversal.
+            nodeList.insert(nodeList.end(), child.GetChildren().begin(), child.GetChildren().end());
+        }
+
+        return false;
+    }
+
+    //-----------------------------------------------------------------------------
     NodeDisplayVisibility CalculateNodeDisplayVisibility(const InstanceDataNode& node, bool isSlicePushUI)
     {
         NodeDisplayVisibility visibility = NodeDisplayVisibility::NotVisible;
@@ -83,8 +106,8 @@ namespace AzToolsFramework
 
         // Use class meta data as opposed to parent's reflection data if this is a base class element,
         // which isn't explicitly reflected by the containing class.
-        if (   (visibility == NodeDisplayVisibility::NotVisible && node.GetElementMetadata())
-            && (node.GetElementMetadata()->m_flags & AZ::SerializeContext::ClassElement::FLG_BASE_CLASS))
+        if ((visibility == NodeDisplayVisibility::NotVisible && node.GetElementMetadata()) &&
+            (node.GetElementMetadata()->m_flags & AZ::SerializeContext::ClassElement::FLG_BASE_CLASS))
         {
             if (node.GetClassMetadata() && node.GetClassMetadata()->m_editData)
             {
@@ -115,6 +138,10 @@ namespace AzToolsFramework
             {
                 visibility = NodeDisplayVisibility::ShowChildrenOnly;
             }
+            else if (visibilityAttribute == AZ::Edit::PropertyVisibility::HideChildren)
+            {
+                visibility = NodeDisplayVisibility::HideChildren;
+            }
         }
 
         if (isSlicePushUI)
@@ -124,16 +151,6 @@ namespace AzToolsFramework
             {
                 const AZ::SerializeContext::ClassData* classData = node.GetClassMetadata();
                 if (classData && classData->m_azRtti && classData->m_azRtti->IsTypeOf(azrtti_typeid<AZ::Component>()))
-                {
-                    visibility = AzToolsFramework::NodeDisplayVisibility::Visible;
-                }
-            }
-
-            // Nodes marked PushableEvenIfInvisible should appear when their child nodes are being pushed
-            if (visibility != AzToolsFramework::NodeDisplayVisibility::Visible)
-            {
-                const AZ::u32 sliceFlags = SliceUtilities::GetNodeSliceFlags(node);
-                if (0 != (sliceFlags & AZ::Edit::UISliceFlags::PushableEvenIfInvisible))
                 {
                     visibility = AzToolsFramework::NodeDisplayVisibility::Visible;
                 }

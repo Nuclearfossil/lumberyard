@@ -91,7 +91,6 @@ private:
 
 void* CAsyncIOFileRequest::operator new (size_t sz)
 {
-    ScopedSwitchToGlobalHeap useGlobalHeap;
     return CryModuleMemalign(sz, alignof(CAsyncIOFileRequest));
 }
 
@@ -248,13 +247,7 @@ uint32 CAsyncIOFileRequest::AllocateOutput(CCachedFileData* pZipEntry)
 
         if (nAllocSize)
         {
-#if defined(INCLUDE_MEMSTAT_CONTEXTS)
-            char usageHint[512];
-            sprintf_s(usageHint, 512, "AsyncIO TempBuffer: %s", m_strFileName.c_str());
-#else
             const char* usageHint = "AsyncIO TempBuffer";
-#endif
-
             pBuffer = (char*)GetStreamEngine()->TempAlloc(nAllocSize, usageHint, true, IgnoreOutofTmpMem(), BUFFER_ALIGNMENT);
             if (!pBuffer)
             {
@@ -364,13 +357,7 @@ uint32 CAsyncIOFileRequest::AllocateOutput(CCachedFileData* pZipEntry)
 
 byte* CAsyncIOFileRequest::AllocatePage(size_t sz, bool bOnlyPakMem, SStreamPageHdr*& pHdrOut)
 {
-#if defined(INCLUDE_MEMSTAT_CONTEXTS)
-    char usageHint[512];
-    sprintf_s(usageHint, 512, "streaming page: %s", m_strFileName.c_str());
-#else
     const char* usageHint = "streaming page";
-#endif
-
     size_t nSzAligned = Align(sz, BUFFER_ALIGNMENT);
     size_t nToAlloc = nSzAligned + sizeof(SStreamPageHdr);
     byte* pRet = (byte*)GetStreamEngine()->TempAlloc(nToAlloc, usageHint, true, !bOnlyPakMem, BUFFER_ALIGNMENT);
@@ -400,13 +387,13 @@ void CAsyncIOFileRequest::Cancel()
 void CAsyncIOFileRequest::SyncWithDecrypt()
 {
 #if defined(STREAMENGINE_SUPPORT_DECRYPT)
-    m_decryptJobExecutor.WaitForCompletion();
+    m_decryptJobExecutor.reset(); // destructor waits on job completion
 #endif  //STREAMENGINE_SUPPORT_DECRYPT
 }
 
 void CAsyncIOFileRequest::SyncWithDecompress()
 {
-    m_decompJobExecutor.WaitForCompletion();
+    m_decompJobExecutor.reset(); // destructor waits on job completion
 }
 
 //////////////////////////////////////////////////////////////////////////
@@ -542,6 +529,11 @@ void CAsyncIOFileRequest::Flush()
 
 void CAsyncIOFileRequest::Reset()
 {
+#if defined(STREAMENGINE_SUPPORT_DECRYPT)
+    m_decryptJobExecutor.reset(); // destructor waits on job completion
+#endif
+    m_decompJobExecutor.reset(); // destructor waits on job completion
+
 #ifndef _RELEASE
     if (m_pMemoryBuffer)
     {
@@ -985,7 +977,7 @@ void CAsyncIOFileRequest::ComputeSortKey(uint64 nCurrentKeyInProgress)
 
     const int g_nMaxPath = 0x800;
     char szFullPathBuf[g_nMaxPath];
-    const char* szFullPath = gEnv->pCryPak->AdjustFileName(m_strFileName.c_str(), szFullPathBuf, ICryPak::FOPEN_HINT_QUIET);
+    const char* szFullPath = gEnv->pCryPak->AdjustFileName(m_strFileName.c_str(), szFullPathBuf, AZ_ARRAY_SIZE(szFullPathBuf), ICryPak::FOPEN_HINT_QUIET);
 
     CCryPak* pCryPak = static_cast<CCryPak*>(gEnv->pCryPak);
 

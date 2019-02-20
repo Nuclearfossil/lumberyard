@@ -347,7 +347,7 @@ namespace AZ
             size_t index = 0;
             for (const auto& mat : m_materials)
             {
-                if (mat->GetName().compare(name) == 0)
+                if (mat && mat->GetName().compare(name) == 0)
                 {
                     return index;
                 }
@@ -390,7 +390,7 @@ namespace AZ
             //Don't add two materials with the same name. 
             for (const auto& mat : m_materials)
             {
-                if (mat->GetName().compare(material->GetName()) == 0)
+                if (mat && mat->GetName().compare(material->GetName()) == 0)
                 {
                     return;
                 }
@@ -500,9 +500,7 @@ namespace AZ
 
             //Write out MTL data from rapidXML then write mtl file to disk. 
             AZStd::vector<char> buffer;
-            IO::ByteContainerStream<AZStd::vector<char>> stream(&buffer);
-            IO::RapidXMLStreamWriter streamWriter(&stream);
-            rapidxml::print(streamWriter, m_mtlDoc);
+            rapidxml::print(AZStd::back_inserter(buffer), m_mtlDoc);
 
             mtlFile.Write(buffer.data(), buffer.size());
             mtlFile.Close();
@@ -526,8 +524,11 @@ namespace AZ
             AZ::Crc32 hash(0u);
             for (const auto& mat : m_materials)
             {
-                AZ::u32 subMaterialHash = mat->GetDccMaterialHash();
-                hash.Add(&subMaterialHash, sizeof(AZ::u32));
+                if (mat)
+                {
+                    AZ::u32 subMaterialHash = mat->GetDccMaterialHash();
+                    hash.Add(&subMaterialHash, sizeof(AZ::u32));
+                }
             }
             return hash;
         }
@@ -553,7 +554,10 @@ namespace AZ
             m_mtlDoc.append_node(rootNode);
             for (const auto& mat : m_materials)
             {
-                subMaterialNode->append_node(CreateMaterialMtlNode(*(mat.get())));
+                if (mat)
+                {
+                    subMaterialNode->append_node(CreateMaterialMtlNode(*(mat.get())));
+                }
             }
         }
 
@@ -561,20 +565,26 @@ namespace AZ
         {
             // Update DCC material hash
             rapidxml::xml_node<char>* rootNode = m_mtlDoc.first_node(MaterialExport::g_materialString);
-            rapidxml::xml_attribute<char>* dccMaterialHashAttribute = rootNode->first_attribute(MaterialExport::g_dccMaterialHashString);
-            if (dccMaterialHashAttribute)
+            if (rootNode)
             {
-                const AZStd::string hashString = AZStd::string::format("%u", CalculateDccMaterialHash());
-                dccMaterialHashAttribute->value(m_mtlDoc.allocate_string(hashString.c_str()));
-            }
-
-            //update or add materials
-            for (auto& mat : m_materials)
-            {
-                bool updated = UpdateMaterialNode(*(mat.get()));
-                if (!updated)
+                rapidxml::xml_attribute<char>* dccMaterialHashAttribute = rootNode->first_attribute(MaterialExport::g_dccMaterialHashString);
+                if (dccMaterialHashAttribute)
                 {
-                    AddMaterialNode(*(mat.get()));
+                    const AZStd::string hashString = AZStd::string::format("%u", CalculateDccMaterialHash());
+                    dccMaterialHashAttribute->value(m_mtlDoc.allocate_string(hashString.c_str()));
+                }
+
+                //update or add materials
+                for (auto& mat : m_materials)
+                {
+                    if (mat)
+                    {
+                        bool updated = UpdateMaterialNode(*(mat.get()));
+                        if (!updated)
+                        {
+                            AddMaterialNode(*(mat.get()));
+                        }
+                    }
                 }
             }
         }
@@ -801,7 +811,7 @@ namespace AZ
                 while (materialNode)
                 {
                     rapidxml::xml_attribute<char>* name = materialNode->first_attribute(MaterialExport::g_nameString);
-                    if (azstrnicmp(name->value(), mat.GetName().c_str(), mat.GetName().size()) == 0)
+                    if (name && azstrnicmp(name->value(), mat.GetName().c_str(), mat.GetName().size()) == 0)
                     {
                         break;
                     }
@@ -811,7 +821,7 @@ namespace AZ
             else
             {
                 rapidxml::xml_attribute<char>* name = materialNode->first_attribute(MaterialExport::g_nameString);
-                if (azstrnicmp(name->value(), mat.GetName().c_str(), mat.GetName().size()) != 0)
+                if (name && azstrnicmp(name->value(), mat.GetName().c_str(), mat.GetName().size()) != 0)
                 {
                     return nullptr;
                 }

@@ -16,23 +16,22 @@
 #include <QColor>
 #include <QMap>
 #include <QTranslator>
-#include <QScopedPointer>
 #include <QSet>
 #include "IEventLoopHook.h"
 #include <unordered_map>
 #include "BoostHelpers.h"
 
+#include <AzCore/PlatformDef.h>
 #include <AzCore/UserSettings/UserSettingsProvider.h>
 
 class QFileInfo;
 typedef QList<QFileInfo> QFileInfoList;
 class QByteArray;
-class QQmlEngine;
 
-namespace AZ
-{
-    class Entity;
-}
+#ifdef DEPRECATED_QML_SUPPORT
+class QQmlEngine;
+#endif
+
 
 namespace AzQtComponents
 {
@@ -78,6 +77,8 @@ namespace Editor
 
         static bool IsActive();
 
+        bool isMovingOrResizing() const;
+
         // QAbstractNativeEventFilter:
         bool nativeEventFilter(const QByteArray& eventType, void* message, long* result) override;
 
@@ -85,23 +86,28 @@ namespace Editor
         void OnEditorNotifyEvent(EEditorNotifyEvent event) override;
 
         // get the QML engine, if available.
+#ifdef DEPRECATED_QML_SUPPORT
         QQmlEngine* GetQMLEngine() const;
+#endif
 
         const QColor& GetColorByName(const QString& colorName);
 
         void EnableOnIdle(bool enable = true);
-        void ResetIdleTimer(bool isInGameMode = false);
 
         bool eventFilter(QObject* object, QEvent* event) override;
 
         QSet<int> pressedKeys() const { return m_pressedKeys; }
         int pressedMouseButtons() const { return m_pressedButtons; }
-#ifdef _DEBUG
+#ifdef AZ_DEBUG_BUILD
         bool notify(QObject* receiver, QEvent* ev) override;
 #endif
+
     public Q_SLOTS:
+
+#ifdef DEPRECATED_QML_SUPPORT
         void InitializeQML();
         void UninitializeQML();
+#endif
 
         void setIsMovingOrResizing(bool isMovingOrResizing);
 
@@ -111,17 +117,26 @@ namespace Editor
         void skinChanged();
 
     private:
+        enum TimerResetFlag
+        {
+            PollState,
+            GameMode,
+            EditorMode
+        };
+        void ResetIdleTimerInterval(TimerResetFlag = PollState);
         static QColor InterpolateColors(QColor a, QColor b, float factor);
         void RefreshStyleSheet();
         void InstallFilters();
         void UninstallFilters();
         void maybeProcessIdle();
-        void InitQtEntity();
 
         AzQtComponents::LumberyardStylesheet* m_stylesheet;
 
         bool m_inWinEventFilter = false;
+
+#ifdef DEPRECATED_QML_SUPPORT
         QQmlEngine* m_qmlEngine = nullptr;
+#endif
 
         // Translators
         void InstallEditorTranslators();
@@ -141,7 +156,5 @@ namespace Editor
         QSet<int> m_pressedKeys;
 
         bool m_activatedLocalUserSettings = false;
-
-        QScopedPointer<AZ::Entity> m_qtEntity;
     };
 } // namespace editor

@@ -11,6 +11,7 @@
     {
         "Include/Rendering": 
         [
+            "include/LmbrCentral/Rendering/EditorCameraCorrectionBus.h",
             "include/LmbrCentral/Rendering/EditorLightComponentBus.h"
         ],
         "Source/Animation": 
@@ -123,10 +124,12 @@
             "Source/Shape/EditorCompoundShapeComponent.cpp",
             "Source/Shape/EditorSplineComponent.h",
             "Source/Shape/EditorSplineComponent.cpp",
+            "Source/Shape/EditorTubeShapeComponent.h",
+            "Source/Shape/EditorTubeShapeComponent.cpp",
             "Source/Shape/EditorPolygonPrismShapeComponent.h",
             "Source/Shape/EditorPolygonPrismShapeComponent.cpp",
-            "Source/Shape/ShapeComponentConverters.h",
-            "Source/Shape/ShapeComponentConverters.cpp"
+            "Source/Shape/EditorShapeComponentConverters.h",
+            "Source/Shape/EditorShapeComponentConverters.cpp"
         ],
         "source/Ai": [
             "Source/Ai/EditorNavigationSeedComponent.h",

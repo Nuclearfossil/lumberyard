@@ -18,7 +18,8 @@
 #include <AzCore/Outcome/Outcome.h>
 #include <AzCore/Math/Crc.h>
 #include <AzCore/Asset/AssetCommon.h>
-#include <Azcore/Asset/AssetManagerBus.h>
+#include <AzCore/Asset/AssetManagerBus.h>
+#include <AzCore/PlatformDef.h>
 
 namespace AzToolsFramework
 {
@@ -42,6 +43,10 @@ namespace AzToolsFramework
 
             using MutexType = AZStd::recursive_mutex;
 
+            // don't lock this bus during dispatch - its mainly just a forwarder of socket-based network requests
+            // so when one thread is asking for status of an asset, its okay for another thread to do the same.
+            static const bool LocklessDispatch = true; 
+
             virtual ~AssetSystemRequest() = default;
 
             //! Retrieve the absolute folder path to the current game's source assets (the ones that go into source control)
@@ -61,9 +66,6 @@ namespace AzToolsFramework
             /// or when the source is in a different folder or in a different location (such as inside gems)
             virtual bool GetFullSourcePathFromRelativeProductPath(const AZStd::string& relPath, AZStd::string& fullSourcePath) = 0;
 
-            //! Send out queued events
-            virtual void UpdateQueuedEvents() = 0;
-            
             //! retrieve an Az::Data::AssetInfo class for the given assetId.  this may map to source too in which case rootFilePath will be non-empty.
             virtual bool GetAssetInfoById(const AZ::Data::AssetId& assetId, const AZ::Data::AssetType& assetType, AZ::Data::AssetInfo& assetInfo, AZStd::string& rootFilePath) = 0;
 
@@ -88,6 +90,20 @@ namespace AzToolsFramework
             * returns false if it cannot find the source, true otherwise.
             */
             virtual bool GetSourceInfoBySourceUUID(const AZ::Uuid& sourceUuid, AZ::Data::AssetInfo& assetInfo, AZStd::string& watchFolder) = 0;
+
+            /**
+            * Returns a list of scan folders recorded in the database.
+            * @param scanFolder gets appended with the found folders.
+            */
+            virtual bool GetScanFolders(AZStd::vector<AZStd::string>& scanFolders) = 0;
+
+            /**
+            * Populates a list with folders that are safe to store assets in.
+            * This is a subset of the scan folders.
+            * @param scanFolder gets appended with the found folders.
+            * @return false if this process fails.
+            */
+            virtual bool GetAssetSafeFolders(AZStd::vector<AZStd::string>& assetSafeFolders) = 0;
         };
         
 
@@ -280,6 +296,20 @@ namespace AzToolsFramework
             /// Retrieve the actual log content for a particular job.   you can retrieve the run key from the above info function.
             virtual AZ::Outcome<AZStd::string> GetJobLog(AZ::u64 jobrunkey) = 0;
         };
+
+        inline const char* GetHostAssetPlatform()
+        {
+#if defined(AZ_PLATFORM_APPLE_OSX)
+            return "osx_gl";
+#elif defined(AZ_PLATFORM_WINDOWS)
+            return "pc";
+#elif defined(AZ_PLATFORM_LINUX)
+            // set this to pc because that's what bootstrap.cfg currently defines the platform to "pc", even on Linux
+            return "pc";
+#else
+            #error Unimplemented Host Asset Platform
+#endif
+        }
 
     } // namespace AssetSystem
     using AssetSystemBus = AZ::EBus<AssetSystem::AssetSystemNotifications>;

@@ -26,8 +26,6 @@
 #include "AttributeQuaternion.h"
 #include "AttributeColor.h"
 #include "AttributePointer.h"
-#include "AttributeArray.h"
-#include "AttributeSet.h"
 
 
 namespace MCore
@@ -183,17 +181,15 @@ namespace MCore
         mRegistered.Reserve(32);
 
         // register the standard attribute types
-        RegisterAttribute(new AttributeFloat());
-        RegisterAttribute(new AttributeInt32());
-        RegisterAttribute(new AttributeString());
-        RegisterAttribute(new AttributeBool());
-        RegisterAttribute(new AttributeVector2());
-        RegisterAttribute(new AttributeVector3());
-        RegisterAttribute(new AttributeVector4());
-        RegisterAttribute(new AttributeQuaternion());
-        RegisterAttribute(new AttributeColor());
-        RegisterAttribute(new AttributePointer());
-        RegisterAttribute(new AttributeArray());
-        RegisterAttribute(new AttributeSet());
+        RegisterAttribute(aznew AttributeFloat());
+        RegisterAttribute(aznew AttributeInt32());
+        RegisterAttribute(aznew AttributeString());
+        RegisterAttribute(aznew AttributeBool());
+        RegisterAttribute(aznew AttributeVector2());
+        RegisterAttribute(aznew AttributeVector3());
+        RegisterAttribute(aznew AttributeVector4());
+        RegisterAttribute(aznew AttributeQuaternion());
+        RegisterAttribute(aznew AttributeColor());
+        RegisterAttribute(aznew AttributePointer());
     }
 }   // namespace MCore

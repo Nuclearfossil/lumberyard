@@ -229,15 +229,6 @@ void CViewManager::SelectViewport(CViewport* pViewport)
     {
         m_pSelectedView->SetSelected(false);
 
-        if (gEnv->pGame && m_pSelectedView->GetType() == ET_ViewportCamera)
-        {
-            // This is the main view, here we inform the ViewSystem as well.
-            IViewSystem* const pIViewSystem = gEnv->pGame->GetIGameFramework()->GetIViewSystem();
-
-            if (pIViewSystem != NULL)
-            {
-            }
-        }
     }
 
     m_pSelectedView = pViewport;
@@ -245,16 +236,6 @@ void CViewManager::SelectViewport(CViewport* pViewport)
     if (m_pSelectedView != NULL)
     {
         m_pSelectedView->SetSelected(true);
-        if (m_pSelectedView->GetType() == ET_ViewportCamera)
-        {
-            // This is the main view, here we inform the ViewSystem as well.
-            if (gEnv->pGame)
-            {
-                if (IViewSystem* const pIViewSystem = gEnv->pGame->GetIGameFramework()->GetIViewSystem())
-                {
-                }
-            }
-        }
     }
 }
 
@@ -301,6 +282,20 @@ void CViewManager::OnEditorNotifyEvent(EEditorNotifyEvent event)
         break;
     case eNotify_OnUpdateViewports:
         UpdateViews();
+        break;
+    case eNotify_OnRefCoordSysChange:
+        if (m_manipulatorManager)
+        {
+            RefCoordSys refCoordsSys = GetIEditor()->GetReferenceCoordSys();
+            if (refCoordsSys == RefCoordSys::COORDS_WORLD)
+            {
+                m_manipulatorManager->SetManipulatorSpace(AzToolsFramework::ManipulatorSpace::World);
+            }
+            else
+            {
+                m_manipulatorManager->SetManipulatorSpace(AzToolsFramework::ManipulatorSpace::Local);
+            }
+        }
         break;
     }
 }

@@ -68,14 +68,14 @@ public:
     void Select(bool bSelect);
     bool IsSelected() const;
 
-    void SetTime(float time);
+    void SetTime(float time, bool notifyListeners = true);
     float GetTime() const;
 
     float GetDuration() const;
 
     const char* GetDescription() const;
 
-    void Offset(float offset);
+    void Offset(float offset, bool notifyListeners);
 
     bool operator==(const CTrackViewKeyHandle& keyHandle) const;
     bool operator!=(const CTrackViewKeyHandle& keyHandle) const;
@@ -191,11 +191,12 @@ public:
     // Clear selection of this node and all sub nodes
     void ClearSelection();
 
-    // Expanded state
-    virtual void SetExpanded(bool bExpanded);
-    virtual bool IsExpanded() const { return m_bExpanded; }
+    // Expanded state interface
+    virtual void SetExpanded(bool expanded) = 0;
+    virtual bool GetExpanded() const = 0;
 
     // Disabled state
+    virtual bool CanBeEnabled() const { return true; }
     virtual void SetDisabled(bool bDisabled) {}
     virtual bool IsDisabled() const { return false; }
 
@@ -244,7 +245,6 @@ protected:
     std::vector<std::unique_ptr<CTrackViewNode> > m_childNodes;
 
     bool m_bSelected;
-    bool m_bExpanded;
     bool m_bHidden;
 };
 #endif // CRYINCLUDE_EDITOR_TRACKVIEW_TRACKVIEWNODE_H

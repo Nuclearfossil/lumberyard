@@ -21,27 +21,50 @@
 #include <AzCore/RTTI/AttributeReader.h>
 #include <AzCore/Serialization/DynamicSerializableField.h>
 #include <AzCore/Script/ScriptProperty.h>
+#include <AzCore/Math/Crc.h>
 
 #include <AzCore/Serialization/EditContextConstants.inl>
-
+#include "ComponentEditor.hxx"
 #include "PropertyEditorAPI.h"
 
 namespace
 {
-    AZStd::string GetLabel(AzToolsFramework::InstanceDataNode* node)
+    AZStd::string GetStringFromAttribute(AzToolsFramework::InstanceDataNode* node, AZ::Edit::AttributeId attribId)
     {
+        if (!node)
+        {
+            return "";
+        }
+
+        AZ::Edit::Attribute* attr{};
         const AZ::Edit::ElementData* elementEditData = node->GetElementEditMetadata();
-        if(!elementEditData)
+        if (elementEditData)
+        {
+            attr = elementEditData->FindAttribute(attribId);
+        }
+
+        // Attempt to look up the attribute on the node reflected class data.
+        // This look up is done via AZ::SerializeContext::ClassData -> AZ::Edit::ClassData -> EditorData element
+        if (!attr)
+        {
+            if (const AZ::SerializeContext::ClassData* classData = node->GetClassMetadata())
+            {
+                if (const auto* editClassData = classData->m_editData)
+                {
+                    if (const auto* classEditorData = editClassData->FindElementData(AZ::Edit::ClassElements::EditorData))
+                    {
+                        attr = classEditorData->FindAttribute(attribId);
+                    }
+                }
+            }
+        }
+
+        if (!attr)
         {
             return "";
         }
 
-        AZ::Edit::Attribute* attr = elementEditData->FindAttribute(AZ::Edit::Attributes::NameLabelOverride);
-        if(!attr)
-        {
-            return "";
-        }
-
+        // Read the string from the attribute found.
         AZStd::string label;
         for (size_t instIndex = 0; instIndex < node->GetNumInstances(); ++instIndex)
         {
@@ -53,6 +76,103 @@ namespace
         }
 
         return "";
+    }
+
+    template<typename Type>
+    Type GetFromAttribute(AzToolsFramework::InstanceDataNode* node, AZ::Edit::AttributeId attribId)
+    {
+        if (!node)
+        {
+            return Type();
+        }
+
+        AZ::Edit::Attribute* attr{};
+        const AZ::Edit::ElementData* elementEditData = node->GetElementEditMetadata();
+        if (elementEditData)
+        {
+            attr = elementEditData->FindAttribute(attribId);
+        }
+
+        // Attempt to look up the attribute on the node reflected class data.
+        // This look up is done via AZ::SerializeContext::ClassData -> AZ::Edit::ClassData -> EditorData element
+        if (!attr)
+        {
+            if (const AZ::SerializeContext::ClassData* classData = node->GetClassMetadata())
+            {
+                if (const auto* editClassData = classData->m_editData)
+                {
+                    if (const auto* classEditorData = editClassData->FindElementData(AZ::Edit::ClassElements::EditorData))
+                    {
+                        attr = classEditorData->FindAttribute(attribId);
+                    }
+                }
+            }
+        }
+
+        if (!attr)
+        {
+            return Type();
+        }
+
+        // Read the value from the attribute found.
+        Type retVal = Type();
+        for (size_t instIndex = 0; instIndex < node->GetNumInstances(); ++instIndex)
+        {
+            AzToolsFramework::PropertyAttributeReader reader(node->GetInstance(instIndex), attr);
+            if (reader.Read<Type>(retVal))
+            {
+                return retVal;
+            }
+        }
+
+        return Type();
+    }
+
+    AZStd::string GetDisplayLabel(AzToolsFramework::InstanceDataNode* node)
+    {
+        if (!node)
+        {
+            return "";
+        }
+
+        AZStd::string label;
+
+        // We want to check to see if a name override was provided by our first real
+        // non-container parent.
+        //
+        // 'real' basically means something that is actually going to display.
+        //
+        // If we don't have a parent override, then we can take a look at applying out internal name override.        
+        AzToolsFramework::InstanceDataNode* parentNode = node->GetParent();
+
+        while (parentNode)
+        {
+            bool nonContainerNodeFound = !parentNode->GetClassMetadata() || !parentNode->GetClassMetadata()->m_container;
+
+            if (nonContainerNodeFound)
+            {
+                const bool isSlicePushUI = false;
+                AzToolsFramework::NodeDisplayVisibility visibility = CalculateNodeDisplayVisibility((*parentNode), isSlicePushUI);
+
+                nonContainerNodeFound = (visibility == AzToolsFramework::NodeDisplayVisibility::Visible);
+            }
+
+            label = GetStringFromAttribute(parentNode, AZ::Edit::Attributes::ChildNameLabelOverride);
+            if (!label.empty() || nonContainerNodeFound)
+            {
+                break;
+            }
+
+            parentNode = parentNode->GetParent();
+        }
+
+        // If our parent isn't controlling us. Fall back to whatever we want to be called
+        if (label.empty())
+        {
+            label = GetStringFromAttribute(node, AZ::Edit::Attributes::NameLabelOverride);
+        }
+
+        return label;
     }
 }
 
@@ -197,11 +317,17 @@ namespace AzToolsFramework
         {
             for (size_t i = 0; i < m_instances.size(); ++i)
             {
+                // check capacity of container before attempting to reserve an element
+                if (container->IsFixedCapacity() && !container->IsSmartPointer() && container->Size(GetInstance(i)) >= container->Capacity(GetInstance(i)))
+                {
+                    AZ_Warning("Serializer", false, "Cannot add additional entries to the container as it is at its capacity of %zu", container->Capacity(GetInstance(i)));
+                    return false;
+                }
                 // reserve entry in the container
                 void* dataAddress = container->ReserveElement(GetInstance(i), containerClassElement);
                 bool noDefaultData = (containerClassElement->m_flags & AZ::SerializeContext::ClassElement::FLG_NO_DEFAULT_VALUE) != 0;
 
-                if (!fillData(dataAddress, containerClassElement, noDefaultData, m_context) && noDefaultData) // fill default data
+                if (!dataAddress || !fillData(dataAddress, containerClassElement, noDefaultData, m_context) && noDefaultData) // fill default data
                 {
                     return false;
                 }
@@ -366,7 +492,7 @@ namespace AzToolsFramework
     }
 
     //-----------------------------------------------------------------------------
-    void InstanceDataHierarchy::Build(AZ::SerializeContext* sc, unsigned int accessFlags, DynamicEditDataProvider dynamicEditDataProvider)
+    void InstanceDataHierarchy::Build(AZ::SerializeContext* sc, unsigned int accessFlags, DynamicEditDataProvider dynamicEditDataProvider, ComponentEditor* editorParent)
     {
         AZ_PROFILE_FUNCTION(AZ::Debug::ProfileCategory::AzToolsFramework);
 
@@ -382,15 +508,21 @@ namespace AzToolsFramework
         m_context = sc;
         m_comparisonHierarchies.clear();
 
+        AZ::SerializeContext::EnumerateInstanceCallContext callContext(
+            AZStd::bind(&InstanceDataHierarchy::BeginNode, this, AZStd::placeholders::_1, AZStd::placeholders::_2, AZStd::placeholders::_3, dynamicEditDataProvider),
+            AZStd::bind(&InstanceDataHierarchy::EndNode, this),
+            sc,
+            AZ::SerializeContext::ENUM_ACCESS_FOR_READ,
+            nullptr
+        );
+
         sc->EnumerateInstanceConst(
-            m_rootInstances[0].m_instance
+            &callContext
+            , m_rootInstances[0].m_instance
             , m_rootInstances[0].m_classId
-            , AZStd::bind(&InstanceDataHierarchy::BeginNode, this, AZStd::placeholders::_1, AZStd::placeholders::_2, AZStd::placeholders::_3, dynamicEditDataProvider)
-            , AZStd::bind(&InstanceDataHierarchy::EndNode, this)
-            , accessFlags
             , nullptr
             , nullptr
-            );
+        );
 
         for (size_t i = 1; i < m_rootInstances.size(); ++i)
         {
@@ -398,22 +530,20 @@ namespace AzToolsFramework
             m_isMerging = true;
             m_matched = false;
             sc->EnumerateInstanceConst(
-                m_rootInstances[i].m_instance
+                &callContext
+                , m_rootInstances[i].m_instance
                 , m_rootInstances[i].m_classId
-                , AZStd::bind(&InstanceDataHierarchy::BeginNode, this, AZStd::placeholders::_1, AZStd::placeholders::_2, AZStd::placeholders::_3, dynamicEditDataProvider)
-                , AZStd::bind(&InstanceDataHierarchy::EndNode, this)
-                , accessFlags
                 , nullptr
                 , nullptr
-                );
+            );
         }
 
-        RefreshComparisonData(accessFlags, dynamicEditDataProvider);
+        bool dataIdentical = RefreshComparisonData(accessFlags, dynamicEditDataProvider);
+        FixupEditData();
 
-        // if we ended up with anything to display, we need to do another pass to fix up container element nodes.
-        if (m_matched)
+        if (editorParent)
         {
-            FixupEditData(this, 0);
+            editorParent->SetComponentOverridden(!dataIdentical);
         }
     }
 
@@ -454,7 +584,7 @@ namespace AzToolsFramework
             }
             if (mergeContainerEditData)
             {
-                AZStd::string label = GetLabel(node);
+                AZStd::string label = GetDisplayLabel(node);
                 m_supplementalEditData.back().m_displayLabel = label.empty() ? AZStd::string::format("[%d]", siblingIdx) : label;
                 editData->m_description = nullptr;
                 editData->m_name = m_supplementalEditData.back().m_displayLabel.c_str();
@@ -1066,21 +1196,41 @@ namespace AzToolsFramework
 
                 if (!valueComparisonFunction(sourceNode, targetNode))
                 {
+                    // This is a leaf element (has a direct serializer), so it's a data change.
+                    tempSourceBuffer.clear();
+                    tempTargetBuffer.clear();
+                    AZ::IO::ByteContainerStream<AZStd::vector<AZ::u8> > sourceStream(&tempSourceBuffer), targetStream(&tempTargetBuffer);
+                    targetNode->m_classData->m_serializer->Save(targetNode->GetInstance(0), targetStream);
+                    sourceNode->m_classData->m_serializer->Save(sourceNode->GetInstance(0), sourceStream);
+
                     changedNodeCallback(sourceNode, targetNode, tempSourceBuffer, tempTargetBuffer);
                 }
             }
             else
             {
                 // This isn't a container; just drill down on child elements.
-                auto targetElementIt = targetNode->m_children.begin();
-                auto sourceElementIt = sourceNode->m_children.begin();
-                while (targetElementIt != targetNode->m_children.end())
+                if (targetNode->m_children.size() == sourceNode->m_children.size())
                 {
-                    CompareHierarchies(&(*sourceElementIt), &(*targetElementIt), tempSourceBuffer, tempTargetBuffer, valueComparisonFunction, context,
-                        newNodeCallback, removedNodeCallback, changedNodeCallback);
+                    auto targetElementIt = targetNode->m_children.begin();
+                    auto sourceElementIt = sourceNode->m_children.begin();
+                    while (targetElementIt != targetNode->m_children.end())
+                    {
+                        CompareHierarchies(&(*sourceElementIt), &(*targetElementIt), tempSourceBuffer, tempTargetBuffer, valueComparisonFunction, context,
+                            newNodeCallback, removedNodeCallback, changedNodeCallback);
 
-                    ++sourceElementIt;
-                    ++targetElementIt;
+                        ++sourceElementIt;
+                        ++targetElementIt;
+                    }
+                }
+                else
+                {
+                    AZ_Error("Serializer", targetNode->m_children.size() == sourceNode->m_children.size(),
+                        "Non-container elements have mismatched sub-element counts. This a recoverable error, "
+                        "but the entire sub-hierarchy will be considered differing as no further drill-down is possible.");
+
+                    tempSourceBuffer.clear();
+                    tempTargetBuffer.clear();
+                    changedNodeCallback(sourceNode, targetNode, tempSourceBuffer, tempTargetBuffer);
                 }
             }
         }
@@ -1225,10 +1375,16 @@ namespace AzToolsFramework
                         {
                             matchedChild = true;
 
-                            if (!targetChild.GetClassMetadata() || targetChild.GetClassMetadata()->m_serializer != sourceChild.GetClassMetadata()->m_serializer)
+                            if (!targetChild.GetClassMetadata() || targetChild.GetClassMetadata()->m_typeId != sourceChild.GetClassMetadata()->m_typeId)
                             {
-                                AZ_Error("Serializer", false, "Nodes with same identifier are not of the same serializable type: types \"%s\" and \"%s\".",
-                                    sourceChild.GetClassMetadata()->m_name, targetChild.GetClassMetadata()->m_name);
+                                AZStd::string sourceTypeId;
+                                AZStd::string targetTypeId;
+
+                                sourceChild.GetClassMetadata()->m_typeId.ToString(sourceTypeId);
+                                targetChild.GetClassMetadata()->m_typeId.ToString(targetTypeId);
+
+                                AZ_Error("Serializer", false, "Nodes with same identifier are not of the same serializable type: types \"%s\" : %s and \"%s\" : %s.",
+                                    sourceChild.GetClassMetadata()->m_name, sourceTypeId.c_str(), targetChild.GetClassMetadata()->m_name, targetTypeId.c_str());
                                 return false;
                             }
 
@@ -1301,7 +1457,8 @@ namespace AzToolsFramework
                     for (size_t i = 0; i < targetNode->GetNumInstances(); ++i)
                     {
                         // Add a new element to the target container.
-                        void* targetPointer = targetClass->m_container->ReserveElement(targetNode->GetInstance(i), sourceChildToAdd->m_classElement);
+                        void* targetInstance = targetNode->GetInstance(i);
+                        void* targetPointer = targetClass->m_container->ReserveElement(targetInstance, sourceChildToAdd->m_classElement);
                         AZ_Assert(targetPointer, "Failed to allocate container element");
 
                         if (sourceChildToAdd->m_classElement->m_flags & AZ::SerializeContext::ClassElement::FLG_POINTER)
@@ -1335,9 +1492,13 @@ namespace AzToolsFramework
                         sourceStream.Seek(0, AZ::IO::GenericStream::ST_SEEK_BEGIN);
 
                         bool loadedFromStream = AZ::Utils::LoadObjectFromStreamInPlace(
-                            sourceStream, context, sourceChildToAdd->GetClassMetadata(), targetPointer, AZ::ObjectStream::FilterDescriptor(AZ::ObjectStream::AssetFilterNoAssetLoading));
+                            sourceStream, context, sourceChildToAdd->GetClassMetadata(), targetPointer, AZ::ObjectStream::FilterDescriptor(AZ::Data::AssetFilterNoAssetLoading));
                         (void)loadedFromStream;
                         AZ_Assert(loadedFromStream, "Failed to copy element to target.");
+
+                        // Some containers, such as AZStd::map require you to call StoreElement to actually consider the element part of the structure
+                        // Since the container is unable to put an uninitialized element into its tree until the key is known
+                        targetClass->m_container->StoreElement(targetInstance, targetPointer);
                     }
                 }
             }

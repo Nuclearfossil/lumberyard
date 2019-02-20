@@ -21,6 +21,8 @@
             "DataTypes/GraphData/IMeshData.h",
             "DataTypes/GraphData/IMeshVertexColorData.h",
             "DataTypes/GraphData/IMeshVertexUVData.h",
+            "DataTypes/GraphData/IMeshVertexTangentData.h",
+            "DataTypes/GraphData/IMeshVertexBitangentData.h",
             "DataTypes/GraphData/IMaterialData.h",
             "DataTypes/GraphData/ITransform.h",
             "DataTypes/GraphData/IBoneData.h",
@@ -109,7 +111,8 @@
             "Containers/Utilities/Filters.h",
             "Containers/Utilities/Filters.inl",
             "Containers/Utilities/SceneGraphUtilities.h",
-            "Containers/Utilities/SceneGraphUtilities.inl"
+            "Containers/Utilities/SceneGraphUtilities.inl",
+            "Containers/Utilities/SceneGraphUtilities.cpp"
         ],
         "Events":
         [
@@ -139,11 +142,6 @@
         [
             "Import/ManifestImportRequestHandler.h",
             "Import/ManifestImportRequestHandler.cpp"
-        ],
-        "Import/Utilities":
-        [
-            "Import/Utilities/FileFinder.h",
-            "Import/Utilities/FileFinder.cpp"
         ],
         "Export":
         [

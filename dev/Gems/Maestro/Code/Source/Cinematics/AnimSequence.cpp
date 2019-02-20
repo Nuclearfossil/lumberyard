@@ -50,7 +50,7 @@
 CAnimSequence::CAnimSequence(IMovieSystem* pMovieSystem, uint32 id, SequenceType sequenceType)
     : m_refCount(0)
 {
-    m_lastGenId = 1;
+    m_nextGenId = 1;
     m_pMovieSystem = pMovieSystem;
     m_flags = 0;
     m_pParentSequence = NULL;
@@ -58,7 +58,8 @@ CAnimSequence::CAnimSequence(IMovieSystem* pMovieSystem, uint32 id, SequenceType
     m_bPaused = false;
     m_bActive = false;
     m_legacySequenceObject = nullptr;
-    m_pActiveDirector = NULL;
+    m_activeDirector = NULL;
+    m_activeDirectorNodeId = -1;
     m_precached = false;
     m_bResetting = false;
     m_sequenceType = sequenceType;
@@ -66,6 +67,7 @@ CAnimSequence::CAnimSequence(IMovieSystem* pMovieSystem, uint32 id, SequenceType
     SetId(id);
 
     m_pEventStrings = aznew CAnimStringTable;
+    m_expanded = true;
 }
 
 //////////////////////////////////////////////////////////////////////////
@@ -203,18 +205,22 @@ IAnimNode* CAnimSequence::GetNode(int index) const
 }
 
 //////////////////////////////////////////////////////////////////////////
-bool CAnimSequence::AddNode(IAnimNode* pAnimNode)
+bool CAnimSequence::AddNode(IAnimNode* animNode)
 {
-    assert(pAnimNode != 0);
+    AZ_Assert(animNode, "Expected valid animNode");
+    if (!animNode)
+    {
+        return false;
+    }
 
-    pAnimNode->SetSequence(this);
-    pAnimNode->SetTimeRange(m_timeRange);
+    animNode->SetSequence(this);
+    animNode->SetTimeRange(m_timeRange);
 
     // Check if this node already in sequence. If found, don't add it again.
     bool found = false;
     for (int i = 0; i < (int)m_nodes.size(); i++)
     {
-        if (pAnimNode == m_nodes[i].get())
+        if (animNode == m_nodes[i].get())
         {
             found = true;
             break;
@@ -222,24 +228,43 @@ bool CAnimSequence::AddNode(IAnimNode* pAnimNode)
     }
     if (!found)
     {
-        m_nodes.push_back(AZStd::intrusive_ptr<IAnimNode>(pAnimNode));
+        m_nodes.push_back(AZStd::intrusive_ptr<IAnimNode>(animNode));
     }
 
-    const int nodeId = static_cast<CAnimNode*>(pAnimNode)->GetId();
-    if (nodeId >= (int)m_lastGenId)
+    const int nodeId = static_cast<CAnimNode*>(animNode)->GetId();
+    if (nodeId >= (int)m_nextGenId)
     {
-        m_lastGenId = nodeId + 1;
+        m_nextGenId = nodeId + 1;
     }
 
-    if (pAnimNode->NeedToRender())
+    // Make sure m_nextTrackId is bigger than the biggest existing track id.
+    // m_nextTrackId is not serialized (track id's are) so this code will
+    // exercise every time a sequence is loaded.
+    int trackCount = animNode->GetTrackCount();
+    for (int trackIndex = 0; trackIndex < trackCount; trackIndex++)
     {
-        AddNodeNeedToRender(pAnimNode);
-    }
+        IAnimTrack* track = animNode->GetTrackByIndex(trackIndex);
+        AZ_Assert(track, "Expected valid track");
+        if (track->GetId() >= m_nextTrackId)
+        {
+            m_nextTrackId = track->GetId() + 1;
+        }
 
-    bool bNewDirectorNode = m_pActiveDirector == NULL && pAnimNode->GetType() == AnimNodeType::Director;
-    if (bNewDirectorNode)
+        int subTrackCount = track->GetSubTrackCount();
+        for (int subTrackIndex = 0; subTrackIndex < subTrackCount; subTrackIndex++)
+        {
+            IAnimTrack* subTrack = track->GetSubTrack(subTrackIndex);
+            AZ_Assert(subTrack, "Expected valid subtrack.");
+            if (subTrack->GetId() >= m_nextTrackId)
+            {
+                m_nextTrackId = subTrack->GetId() + 1;
+            }
+        }
+    }
+     
+    if (animNode->NeedToRender())
     {
-        m_pActiveDirector = pAnimNode;
+        AddNodeNeedToRender(animNode);
     }
 
     return true;
@@ -253,11 +278,11 @@ IAnimNode* CAnimSequence::CreateNodeInternal(AnimNodeType nodeType, uint32 nNode
         return nullptr;   // should never happen, null pointer guard
     }
 
-    CAnimNode* pAnimNode = NULL;
+    CAnimNode* animNode = NULL;
 
     if (nNodeId == -1)
     {
-        nNodeId = m_lastGenId;
+        nNodeId = m_nextGenId;
     }
 
     switch (nodeType)
@@ -266,7 +291,7 @@ IAnimNode* CAnimSequence::CreateNodeInternal(AnimNodeType nodeType, uint32 nNode
             // legacy entities are only allowed to be added to legacy sequences
             if (m_sequenceType == SequenceType::Legacy)
             {
-                pAnimNode = aznew CAnimEntityNode(nNodeId, AnimNodeType::Entity);
+                animNode = aznew CAnimEntityNode(nNodeId, AnimNodeType::Entity);
             }
             else
             {
@@ -277,7 +302,7 @@ IAnimNode* CAnimSequence::CreateNodeInternal(AnimNodeType nodeType, uint32 nNode
             // AZ entities are only allowed to be added to SequenceComponent sequences
             if (m_sequenceType == SequenceType::SequenceComponent)
             {
-                pAnimNode = aznew CAnimAzEntityNode(nNodeId);
+                animNode = aznew CAnimAzEntityNode(nNodeId);
             }
             else
             {
@@ -288,7 +313,7 @@ IAnimNode* CAnimSequence::CreateNodeInternal(AnimNodeType nodeType, uint32 nNode
             // Components are only allowed to be added to SequenceComponent sequences
             if (m_sequenceType == SequenceType::SequenceComponent)
             {
-                pAnimNode = aznew CAnimComponentNode(nNodeId);
+                animNode = aznew CAnimComponentNode(nNodeId);
             }
             else
             {
@@ -299,7 +324,7 @@ IAnimNode* CAnimSequence::CreateNodeInternal(AnimNodeType nodeType, uint32 nNode
             // legacy cameras are only allowed to be added to legacy sequences
             if (m_sequenceType == SequenceType::Legacy)
             {
-                pAnimNode = aznew CAnimCameraNode(nNodeId);
+                animNode = aznew CAnimCameraNode(nNodeId);
             }
             else
             {
@@ -307,62 +332,77 @@ IAnimNode* CAnimSequence::CreateNodeInternal(AnimNodeType nodeType, uint32 nNode
             }
             break;
         case AnimNodeType::CVar:
-            pAnimNode = aznew CAnimCVarNode(nNodeId);
+            animNode = aznew CAnimCVarNode(nNodeId);
             break;
         case AnimNodeType::ScriptVar:
-            pAnimNode = aznew CAnimScriptVarNode(nNodeId);
+            animNode = aznew CAnimScriptVarNode(nNodeId);
             break;
         case AnimNodeType::Director:
-            pAnimNode = aznew CAnimSceneNode(nNodeId);
+            animNode = aznew CAnimSceneNode(nNodeId);
             break;
         case AnimNodeType::Material:
-            pAnimNode = aznew CAnimMaterialNode(nNodeId);
+            animNode = aznew CAnimMaterialNode(nNodeId);
             break;
         case AnimNodeType::Event:
-            pAnimNode = aznew CAnimEventNode(nNodeId);
+            animNode = aznew CAnimEventNode(nNodeId);
             break;
         case AnimNodeType::Group:
-            pAnimNode = aznew CAnimNodeGroup(nNodeId);
+            animNode = aznew CAnimNodeGroup(nNodeId);
             break;
         case  AnimNodeType::Layer:
-            pAnimNode = aznew CLayerNode(nNodeId);
+            animNode = aznew CLayerNode(nNodeId);
             break;
         case AnimNodeType::Comment:
-            pAnimNode = aznew CCommentNode(nNodeId);
+            animNode = aznew CCommentNode(nNodeId);
             break;
         case AnimNodeType::RadialBlur:
         case AnimNodeType::ColorCorrection:
         case AnimNodeType::DepthOfField:
-            pAnimNode = CAnimPostFXNode::CreateNode(nNodeId, nodeType);
+            animNode = CAnimPostFXNode::CreateNode(nNodeId, nodeType);
             break;
         case AnimNodeType::ShadowSetup:
-            pAnimNode = aznew CShadowsSetupNode(nNodeId);
+            animNode = aznew CShadowsSetupNode(nNodeId);
             break;
         case AnimNodeType::ScreenFader:
-            pAnimNode = aznew CAnimScreenFaderNode(nNodeId);
+            animNode = aznew CAnimScreenFaderNode(nNodeId);
             break;
         case AnimNodeType::Light:
-            pAnimNode = aznew CAnimLightNode(nNodeId);
+            animNode = aznew CAnimLightNode(nNodeId);
             break;
 #if defined(USE_GEOM_CACHES)
         case AnimNodeType::GeomCache:
-            pAnimNode = aznew CAnimGeomCacheNode(nNodeId);
+            // legacy geom cache objects are only allowed to be added to legacy sequences
+            if (m_sequenceType == SequenceType::Legacy)
+            {
+                animNode = aznew CAnimGeomCacheNode(nNodeId);
+            }
+            else
+            {
+                m_pMovieSystem->LogUserNotificationMsg("Object Entities (Legacy) are not supported in Component Entity Sequences. Skipping...");
+            }
             break;
 #endif
         case AnimNodeType::Environment:
-            pAnimNode = aznew CAnimEnvironmentNode(nNodeId);
+            animNode = aznew CAnimEnvironmentNode(nNodeId);
             break;
         default:     
             m_pMovieSystem->LogUserNotificationMsg("AnimNode cannot be added because it is an unsupported object type.");
             break;
     }
 
-    if (pAnimNode)
+    if (animNode)
     {
-        AddNode(pAnimNode);
+        if (AddNode(animNode))
+        {
+            // If there isn't an active director, set it now.
+            if (m_activeDirector == NULL && animNode->GetType() == AnimNodeType::Director)
+            {
+                SetActiveDirector(animNode);
+            }
+        }
     }
 
-    return pAnimNode;
+    return animNode;
 }
 
 //////////////////////////////////////////////////////////////////////////
@@ -397,6 +437,20 @@ IAnimNode* CAnimSequence::CreateNode(XmlNodeRef node)
     pNewNode->SetName(name);
     pNewNode->Serialize(node, true, true);
 
+    CAnimNode* newAnimNode = static_cast<CAnimNode*>(pNewNode);
+
+    // Make sure de-serializing this node didn't just create an id conflict. This can happen sometimes
+    // when copy/pasting nodes from a different sequence to this one. 
+    for (auto curNode : m_nodes)
+    {
+        CAnimNode* animNode = static_cast<CAnimNode*>(curNode.get());
+        if (animNode->GetId() == newAnimNode->GetId() && animNode != newAnimNode)
+        {
+            // Conflict detected, resolve it by assigning a new id to the new node.
+            newAnimNode->SetId(m_nextGenId++);
+        }
+    }
+
     return pNewNode;
 }
 
@@ -429,21 +483,13 @@ void CAnimSequence::RemoveNode(IAnimNode* node, bool removeChildRelationships)
         i++;
     }
 
-    // Request the node removal from the SequenceComponent if it's an AZ::Entity
-    if (m_sequenceType == SequenceType::SequenceComponent)
-    {
-        AZ::EntityId removedNodeId = node->GetAzEntityId();
-        if (removedNodeId.IsValid() && m_sequenceEntityId.IsValid())
-        {
-            Maestro::EditorSequenceComponentRequestBus::Event(m_sequenceEntityId, &Maestro::EditorSequenceComponentRequestBus::Events::RemoveEntityToAnimate, removedNodeId);
-        }
-    }
-
     // The removed one was the active director node.
-    if (m_pActiveDirector == node)
+    if (m_activeDirector == node)
     {
         // Clear the active one.
-        m_pActiveDirector = NULL;
+        m_activeDirector = NULL;
+        m_activeDirectorNodeId = -1;
+
         // If there is another director node, set it as active.
         for (AnimNodes::const_iterator it = m_nodes.begin(); it != m_nodes.end(); ++it)
         {
@@ -463,7 +509,8 @@ void CAnimSequence::RemoveAll()
     stl::free_container(m_nodes);
     stl::free_container(m_events);
     stl::free_container(m_nodesNeedToRender);
-    m_pActiveDirector = NULL;
+    m_activeDirector = NULL;
+    m_activeDirectorNodeId = -1;
 }
 
 //////////////////////////////////////////////////////////////////////////
@@ -703,9 +750,9 @@ void CAnimSequence::Animate(const SAnimContext& ec)
 
     // Evaluate all animation nodes in sequence.
     // The director first.
-    if (m_pActiveDirector)
+    if (m_activeDirector)
     {
-        m_pActiveDirector->Animate(animContext);
+        m_activeDirector->Animate(animContext);
     }
 
     for (AnimNodes::iterator it = m_nodes.begin(); it != m_nodes.end(); ++it)
@@ -721,7 +768,7 @@ void CAnimSequence::Animate(const SAnimContext& ec)
 
         // If this is a descendant of a director node and that director is currently not active, skip this one.
         IAnimNode* pParentDirector = pAnimNode->HasDirectorAsParent();
-        if (pParentDirector && pParentDirector != m_pActiveDirector)
+        if (pParentDirector && pParentDirector != m_activeDirector)
         {
             continue;
         }
@@ -1007,10 +1054,10 @@ void CAnimSequence::Serialize(XmlNodeRef& xmlNode, bool bLoading, bool bLoadEmpt
                 CAnimNode* pAnimNode = static_cast<CAnimNode*>((*it).get());
                 pAnimNode->PostLoad();
 
-                // And properly adjust the 'm_lastGenId' to prevent the id clash.
-                if (pAnimNode->GetId() >= (int)m_lastGenId)
+                // And properly adjust the 'm_nextGenId' to prevent the id clash.
+                if (pAnimNode->GetId() >= (int)m_nextGenId)
                 {
-                    m_lastGenId = pAnimNode->GetId() + 1;
+                    m_nextGenId = pAnimNode->GetId() + 1;
                 }
             }
         }
@@ -1086,7 +1133,7 @@ void CAnimSequence::Serialize(XmlNodeRef& xmlNode, bool bLoading, bool bLoadEmpt
 void CAnimSequence::Reflect(AZ::SerializeContext* serializeContext)
 {
     serializeContext->Class<CAnimSequence>()
-        ->Version(2)
+        ->Version(4)
         ->Field("Name", &CAnimSequence::m_name)
         ->Field("SequenceEntityId", &CAnimSequence::m_sequenceEntityId)
         ->Field("Flags", &CAnimSequence::m_flags)
@@ -1094,7 +1141,9 @@ void CAnimSequence::Reflect(AZ::SerializeContext* serializeContext)
         ->Field("ID", &CAnimSequence::m_id)
         ->Field("Nodes", &CAnimSequence::m_nodes)
         ->Field("SequenceType", &CAnimSequence::m_sequenceType)
-        ->Field("Events", &CAnimSequence::m_events);
+        ->Field("Events", &CAnimSequence::m_events)
+        ->Field("Expanded", &CAnimSequence::m_expanded)
+        ->Field("ActiveDirectorNodeId", &CAnimSequence::m_activeDirectorNodeId);
 }
 
 //////////////////////////////////////////////////////////////////////////
@@ -1113,15 +1162,71 @@ void CAnimSequence::InitPostLoad()
         }
     }
 
-    int num = GetNodeCount();
-    for (int i = 0; i < num; i++)
+    IAnimNode* firstDirectorFound = nullptr;
+
+    int nodeCount = GetNodeCount();
+    for (int nodeIndex = 0; nodeIndex < nodeCount; nodeIndex++)
     {
-        IAnimNode* animNode = GetNode(i);
+        IAnimNode* animNode = GetNode(nodeIndex);
         if (animNode)
         {
             AddNode(animNode);
             animNode->InitPostLoad(this);
+
+            // store the first director found
+            if (!firstDirectorFound && animNode->GetType() == AnimNodeType::Director)
+            {
+                firstDirectorFound = animNode;
+            }
+
+            // m_activeDirectorNodeId is serialized in the sequences, so set
+            // this node as the active director if id's match.
+            if (animNode->GetId() == m_activeDirectorNodeId)
+            {
+                SetActiveDirector(animNode);
+            }
         }
+    }
+
+    // All nodes and track have been added and m_nextTrackId is set higher than any
+    // existing track id. Go over the Tracks and make sure all of track id's are assigned.
+    // Track Id's are serialized and should never be zero, unless this is track data from
+    // before Track Ids were added.
+    for (int nodeIndex = 0; nodeIndex < nodeCount; nodeIndex++)
+    {
+        IAnimNode* animNode = GetNode(nodeIndex);
+        if (animNode)
+        {
+            int trackCount = animNode->GetTrackCount();
+            for (int trackIndex = 0; trackIndex < trackCount; trackIndex++)
+            {
+                IAnimTrack* track = animNode->GetTrackByIndex(trackIndex);
+                AZ_Assert(track, "Expected valid track.");
+                if (track->GetId() == 0)
+                {
+                    track->SetId(GetUniqueTrackIdAndGenerateNext());
+                }
+
+                int subTrackCount = track->GetSubTrackCount();
+                for (int subTrackIndex = 0; subTrackIndex < subTrackCount; subTrackIndex++)
+                {
+                    IAnimTrack* subTrack = track->GetSubTrack(subTrackIndex);
+                    AZ_Assert(subTrack, "Expected valid sub track.");
+                    if (subTrack->GetId() == 0)
+                    {
+                        subTrack->SetId(GetUniqueTrackIdAndGenerateNext());
+                    }
+                }
+            }
+        }
+    }
+
+    // If the active director was not set, but there was a director found,
+    // set it as the active director now. This can happen if the sequence
+    // was serialized before the ActiveDirectorNodeId was added.
+    if (!m_activeDirector && firstDirectorFound)
+    {
+        SetActiveDirector(firstDirectorFound);
     }
 }
 
@@ -1541,13 +1646,14 @@ void CAnimSequence::SetActiveDirector(IAnimNode* pDirectorNode)
         return;     // It's not a node belong to this sequence.
     }
 
-    m_pActiveDirector = pDirectorNode;
+    m_activeDirector = pDirectorNode;
+    m_activeDirectorNodeId = pDirectorNode->GetId();
 }
 
 //////////////////////////////////////////////////////////////////////////
 IAnimNode* CAnimSequence::GetActiveDirector() const
 {
-    return m_pActiveDirector;
+    return m_activeDirector;
 }
 
 //////////////////////////////////////////////////////////////////////////

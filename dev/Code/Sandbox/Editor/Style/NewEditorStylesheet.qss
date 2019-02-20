@@ -219,34 +219,18 @@ StatusBarItem[clickable="true"]:hover
 	background-color: @ToolButtonHoverBackgroundColor
 }
 
-AzToolsFramework--AssetBrowser--SearchWidget QLineEdit
-{
-    selection-background-color: rgb(233, 99, 0);
-    background: #6e7071;
-    background-image: url(:/AssetBrowser/Resources/search.png);
-    background-repeat: no-repeat;
-    background-position: left;
-    padding: 2 2 2 24;
-    color: rgb(255, 255, 255);
-}
-
-AzToolsFramework--AssetBrowser--SearchWidget QPushButton#m_buttonClearFilter
-{
-    border: none; 
-    background: #6e7071;
-}
 
 /* ============================================================= */
 /* Styles applied through programmatically-set QT properties      */
 /* ============================================================= */
 
 /* Style for pulse highlight widgets (outliner highlight, etc) */
-AzToolsFramework--OutlinerWidget QWidget[PulseHighlight="true"]
+OutlinerWidget QWidget[PulseHighlight="true"]
 {
     background-color: @MenuItemSelectedColor;
 }
 
-AzToolsFramework--OutlinerWidget QLineEdit
+OutlinerWidget QLineEdit
 {
     background: #FFFFFFFF;
 }
@@ -279,7 +263,20 @@ AzToolsFramework--ReflectedPropertyEditor[ComponentBlock="true"]
 }
 
 /* Style for visualizing property values overridden from their prefab values */
-AzToolsFramework--PropertyRowWidget[IsOverridden="true"] QLabel
+AzToolsFramework--PropertyRowWidget QLabel#Name
+{
+    color: @TextColor;
+    padding: 0 0 0 5;
+}
+
+/* Style for visualizing property values overridden from their prefab values */
+AzToolsFramework--PropertyRowWidget QWidget
+{
+    color: @MenuEnabledTextColor;
+}
+
+/* Style for visualizing property values overridden from their prefab values */
+AzToolsFramework--PropertyRowWidget[IsOverridden="true"] QLabel#Name
 {
     font-family: "Open Sans Extrabold";
     font-weight: bold;
@@ -465,10 +462,17 @@ AzToolsFramework--ComponentEditorHeader #Background[readOnly=false]
     background-image: none;
 }
 
-AzToolsFramework--ComponentEditorHeader #Title
+AzToolsFramework--ComponentEditorHeader #Title[IsOverridden="false"]
 {
     font-weight: bold;
     background-color: transparent;
+}
+
+AzToolsFramework--ComponentEditorHeader #Title[IsOverridden="true"]
+{
+    font-weight: bold;
+    background-color: transparent;
+    color: @MenuItemSelectedColor;
 }
 
 AzToolsFramework--ComponentEditorHeader #Expander
@@ -538,30 +542,45 @@ QLabel #NumOverrides
     font-size:30px; 
 }
 
-QWidget#QuickPushOption
+QWidget#SliceHierarchyMenuItem
 {
     background-color: transparent;
 }
 
-QWidget#QuickPushOption QLabel
+QWidget#SliceHierarchyMenuItem QLabel
 {
     background-color: transparent;
     color: @MenuEnabledTextColor;
 }
 
-QWidget#QuickPushOption QLabel:disabled
+QWidget#SliceHierarchyMenuItem QLabel:disabled
 {
     background-color: transparent;
     color: @MenuDisabledTextColor;
 }
 
-QWidget#QuickPushOption QLabel#NumOverrides
+QWidget#SliceHierarchyMenuItem QLabel#NumOverrides
 {
     background-color: transparent;
-    color: @MenuItemSelectedColor;;
+    color: @MenuItemSelectedColor;
 }
 
-QWidget#QuickPushOption QLabel:hover
+QWidget#SliceHierarchyMenuItem QLabel#ContextLabelEnabled
+{
+    color: @MenuEnabledTextColor;
+}
+
+QWidget#SliceHierarchyMenuItem QMessageBox#ContextWarning QLabel
+{
+    color: @MenuEnabledTextColor;
+}
+
+QWidget#SliceHierarchyMenuItem QMessageBox#ContextWarning QLabel:hover
+{
+    color: @MenuEnabledTextColor;
+}
+
+QWidget#SliceHierarchyMenuItem QLabel:hover
 {
     color: @LinkColor;
 }
@@ -1105,6 +1124,17 @@ QLineEdit[inputValid="false"]:focus
 
 QWidget#ViewportTitleDlgContainer, QWidget#ViewportTitleDlgContainer QWidget {
     background-color: rgba(47, 46, 46, 217);
+}
+
+QLineEdit#filteredSearchWidget
+{
+    selection-background-color: rgb(233, 99, 0);
+    background: #6e7071;
+    background-image: url(:/stylesheet/img/search.png);
+    background-repeat: no-repeat;
+    background-position: left;
+    padding: 2 2 2 24;
+    color: rgb(255, 255, 255);
 }
 
 /*****************************************************************************
@@ -2191,4 +2221,269 @@ OutlinerLockCheckBox#bordered::indicator:checked
 {
     border: 1px solid rgb(240, 195, 45);
     border-radius: 3px;
+}
+
+
+
+
+
+
+/***********************************************************************************************
+ ***********************************************************************************************
+ ***********************************************************************************************
+ ***********************************************************************************************
+
+ The following is copied from Card.qss - that's for UI2.0, this is for backwards compatibility with UI1.0
+ 
+ ***********************************************************************************************
+ ***********************************************************************************************
+ ***********************************************************************************************
+*/
+
+AzQtComponents--Card
+{
+    margin: 0px;
+    padding: 0px;
+    border: 1px solid rgb(33, 34, 35);
+    border-radius: 2px;
+}
+
+AzQtComponents--CardNotification
+{
+    background-color: #1AFDC32D;
+    margin: 2px;
+    border: 1px solid #FDC32D;
+    border-radius: 2px;
+}
+
+AzQtComponents--CardNotification #HeaderFrame,
+AzQtComponents--CardNotification #Icon,
+AzQtComponents--CardNotification #Title
+{
+    background-color: transparent;
+    border: none;
+}
+
+/**
+ * CardHeader is a QFrame with a QHBoxLayout that contains the following children:
+ * #Expander: a QCheckBox used as a "tree expander".
+ * #Icon: a QLabel displaying an icon. The icon is set from c++.
+ * #Title: a QLabel displaying text.
+ * #ContextMenu: a QPushButton used to launch a context menu.
+ */
+
+AzQtComponents--CardHeader
+{
+    margin: 0px;
+    padding: 0px;
+    border: none;
+}
+
+AzQtComponents--CardHeader #Background
+{
+    margin: 2px;
+    padding: 0px;
+    border: none;
+    background-image: none;
+    background-color: transparent;
+}
+
+.primaryCardHeader
+{
+    background-color: #222222;
+}
+
+.secondaryCardHeader
+{
+    background-color: transparent;
+}
+
+AzQtComponents--CardHeader #Background[readOnly=true]
+{
+
+    background-repeat: repeat-xy;
+}
+
+AzQtComponents--CardHeader #Background[readOnly=false]
+{
+    background-image: none;
+}
+
+AzQtComponents--CardHeader #Title
+{
+    font-weight: bold;
+    background-color: transparent;
+}
+
+AzQtComponents--CardHeader #Expander
+{
+    width: 16px;
+    height: 16px;
+    qproperty-flat: true;
+    border: none;
+    color: transparent;
+    background-color: transparent;
+    selection-color: transparent;
+    selection-background-color: transparent;
+    image: none;
+}
+
+AzQtComponents--CardHeader #Expander:enabled:checked
+{
+    image: url(:/Cards/img/UI20/Cards/group_open.png);
+}
+
+AzQtComponents--CardHeader #Expander:enabled:!checked
+{
+    image: url(:/Cards/img/UI20/Cards/group_closed.png);
+}
+
+AzQtComponents--CardHeader #Icon,
+AzQtComponents--CardHeader #WarningIcon
+{
+    width: 16px;
+    height: 16px;
+    border: none;
+    background-color: transparent;
+}
+
+AzQtComponents--CardHeader #ContextMenu
+{
+    qproperty-flat: true;
+    border: none;
+    color: transparent;
+    background-color: transparent;
+    selection-color: transparent;
+    selection-background-color: transparent;
+    image: url(:/Cards/img/UI20/Cards/menu_ico.png);
+}
+
+AzQtComponents--CardHeader #Help
+{
+    qproperty-flat: true;
+    border: none;
+    color: transparent;
+    background-color: transparent;
+    selection-color: transparent;
+    selection-background-color: transparent;
+    image: url(:/Cards/img/UI20/Cards/help.png);
+}
+
+AzQtComponents--CardHeader #Help:hover
+{
+    image: url(:/Cards/img/UI20/Cards/help_hover.png);
+}
+
+.separator
+{
+    color: #999999;
+}
+
+AzQtComponents--Card #SeparatorContainer
+{
+    margin-left: 2px;
+    margin-right: 2px;
+    border: none;
+}
+
+
+/* Some new UI 2.0 style spinboxes, put in here so that we can use the new SpinBoxes with the old style */
+
+AzQtComponents--SpinBox::up-button:disabled,
+AzQtComponents--DoubleSpinBox::up-button:disabled,
+AzQtComponents--SpinBox::down-button:disabled,
+AzQtComponents--DoubleSpinBox::down-button:disabled
+{
+    image: none;
+    border-color: rgba(0, 0, 0, 0);
+    background-color: rgba(0, 0, 0, 0);
+}
+
+AzQtComponents--SpinBox::up-button,
+AzQtComponents--DoubleSpinBox::up-button,
+AzQtComponents--SpinBox::down-button,
+AzQtComponents--DoubleSpinBox::down-button
+{
+    width: 14px;
+    height: 6px;
+    border-width: 1px;
+
+    image: none;
+    border-color: rgba(0, 0, 0, 0);
+    background-color: rgba(0, 0, 0, 0);
+}
+
+AzQtComponents--SpinBox::up-button[hovered=true],
+AzQtComponents--DoubleSpinBox::up-button[hovered=true],
+AzQtComponents--SpinBox::down-button[hovered=true],
+AzQtComponents--DoubleSpinBox::down-button[hovered=true]
+{
+    border-color: #222222;
+    border-style: solid;
+    background-color: #333333;
+}
+
+AzQtComponents--SpinBox::up-button[hovered=true],
+AzQtComponents--DoubleSpinBox::up-button[hovered=true]
+{
+    image: url(:/stylesheet/img/UI20/spinbox-up-arrow.png);
+}
+
+AzQtComponents--SpinBox::down-button:hovered[hovered=true],
+AzQtComponents--DoubleSpinBox::down-button:hovered[hovered=true]
+{
+    image: url(:/stylesheet/img/UI20/spinbox-down-arrow.png);
+}
+
+/** 
+* These are down here so that they override the generic "widget" specs above
+*/
+
+AzToolsFramework--AssetBrowser--SearchWidget QLineEdit
+{
+    selection-background-color: rgb(233, 99, 0);
+    background: #6e7071;
+    background-image: url(:/AssetBrowser/Resources/search.png);
+    background-repeat: no-repeat;
+    background-position: left;
+    padding: 2 2 2 24;
+    color: rgb(255, 255, 255);
+}
+
+AzToolsFramework--AssetBrowser--SearchWidget QPushButton#m_buttonClearFilter
+{
+    border: none; 
+    background: #6e7071;
+}
+
+
+AzToolsFramework--AssetBrowser--AssetBrowserTreeView
+{
+    font-family: "Amazon Ember";
+    font-size: 12px;
+    color: #FFFFFF;
+    show-decoration-selected:0;  /* this prevents the carets from being rendered with an extra square of highlight around them */
+}
+
+AzToolsFramework--AssetBrowser--AssetBrowserTreeView::item
+{
+    padding: 4px;
+}
+
+AzToolsFramework--AssetBrowser--AssetBrowserTreeView:disabled
+{
+    color: #999999;
+    selection-color: #999999;
+}
+
+AzToolsFramework--AssetBrowser--AssetBrowserTreeView::branch:has-children:!has-siblings:closed,
+AzToolsFramework--AssetBrowser--AssetBrowserTreeView::branch:closed:has-children:has-siblings {
+        border-image: none;
+        image: url("EDITOR:Icons/AssetBrowser/CaretClosed_16.png");
+}
+
+AzToolsFramework--AssetBrowser--AssetBrowserTreeView::branch:open:has-children:!has-siblings,
+AzToolsFramework--AssetBrowser--AssetBrowserTreeView::branch:open:has-children:has-siblings  {
+        border-image: none;
+        image: url("EDITOR:Icons/AssetBrowser/CaretOpen_16.png");
 }

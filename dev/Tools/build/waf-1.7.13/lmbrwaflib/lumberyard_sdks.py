@@ -23,7 +23,7 @@ import os
 def is_win_x64_platform(ctx):
     platform = ctx.env['PLATFORM'].lower()
     return ('win_x64' in platform) and (platform in PLATFORMS['win32'])
-    
+
 def is_darwin_x64_platform(ctx):
     platform = ctx.env['PLATFORM'].lower()
     return ('darwin_x64' in platform) and (platform in PLATFORMS['darwin'])
@@ -50,9 +50,7 @@ def should_link_aws_native_sdk_statically(bld):
 
     if ((platform != 'project_generator' and bld.is_variant_monolithic(platform, configuration)) or
         any(substring in platform for substring in [
-            'darwin',
             'ios',
-            'appletv',
             'linux',
             'android',
         ])):
@@ -73,10 +71,10 @@ def get_platform_lib_prefix(bld):
     platform = bld.env['PLATFORM']
     if any(substring in platform for substring in [
         'darwin',
-    'ios',
-    'appletv',
-    'linux',
-    'android',
+	'ios',
+	'appletv',
+	'linux',
+	'android',
     ]):
         return 'lib'
     return ''
@@ -87,7 +85,6 @@ def aws_native_sdk_platforms(bld):
         'win',
         'darwin',
         'ios',
-        'appletv',
         'linux',
         'android_armv7_clang',
         'android_armv8_clang',
@@ -305,7 +302,9 @@ def BuildPlatformLibraryDirectory(bld, forceStaticLinking):
         platformDir = 'windows/intel64'
         compilerDir = None
 
-        if bld.env['MSVC_VERSION'] == 14:
+        if bld.env['MSVC_VERSION'] == 15:
+            compilerDir = 'vs2017'
+        elif bld.env['MSVC_VERSION'] == 14:
             compilerDir = 'vs2015'
         elif bld.env['MSVC_VERSION'] == 12:
             compilerDir = 'vs2013'
@@ -354,7 +353,7 @@ def get_python_home_lib_and_dll(ctx, platform):
     :return:    see the description
     """
 
-    if platform in ['win_x64_vs2013', 'win_x64_vs2015', 'win_x64_test', 'project_generator']:
+    if platform in ['win_x64_vs2013', 'win_x64_vs2015', 'win_x64_vs2017', 'win_x64_clang', 'win_x64_test', 'project_generator']:
         python_version = '2.7.12'
         python_variant = 'windows'
         python_includes = 'include'
@@ -371,8 +370,8 @@ def get_python_home_lib_and_dll(ctx, platform):
     elif platform == 'darwin_x64':
         python_version = '2.7.13'
         python_variant = 'mac'
-        python_includes = 'Headers'
-        python_libs = 'Versions/Current/lib'
+        python_includes = 'Versions/2.7/include/python2.7'
+        python_libs = 'Versions/2.7/lib'
         python_dll_name = 'Versions/2.7/lib/libpython2.7.dylib'
         python_home = os.path.join(ctx.engine_path, 'Tools', 'Python', python_version, python_variant, 'Python.framework')
     else:
@@ -437,7 +436,7 @@ def enable_embedded_python(self):
     platform = self.env['PLATFORM'].lower()
     config = self.env['CONFIGURATION'].lower()
 
-    if platform in ['win_x64_vs2013', 'win_x64_vs2015', 'win_x64_test', 'linux_x64', 'project_generator']:
+    if platform in ['win_x64_vs2013', 'win_x64_vs2015', 'win_x64_vs2017', 'win_x64_clang', 'win_x64_test', 'linux_x64', 'project_generator']:
 
         # Set the USE_DEBUG_PYTHON environment variable to the location of
         # a debug build of python if you want to use one for debug builds.
@@ -504,7 +503,7 @@ def apply_embedded_python_dependency(self):
     """
     current_platform = self.bld.env['PLATFORM']
 
-    if current_platform in ['win_x64_vs2013', 'win_x64_vs2015', 'win_x64_test', 'linux_x64']:
+    if current_platform in ['win_x64_vs2013', 'win_x64_vs2015', 'win_x64_vs2017', 'win_x64_clang', 'win_x64_test', 'linux_x64']:
         # Only supported for win_x64 and linux
         _, _, _, python_dll = get_python_home_lib_and_dll(self.bld, current_platform)
         copy_local_python_to_target(self, python_dll)

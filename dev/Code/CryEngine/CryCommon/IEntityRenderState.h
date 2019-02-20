@@ -116,7 +116,7 @@ enum EOcclusionObjectType
 #define ERF_NO_PHYSICS                  BIT(17)
 #define ERF_NO_DECALNODE_DECALS         BIT(18)
 #define ERF_REGISTER_BY_POSITION        BIT(19)
-// UNUSED                               BIT(20)
+#define ERF_COMPONENT_ENTITY            BIT(20)
 #define ERF_RECVWIND                    BIT(21)
 #define ERF_COLLISION_PROXY             BIT(22) // Collision proxy is a special object that is only visible in editor
 // and used for physical collisions with player and vehicles.
@@ -317,6 +317,18 @@ struct IRenderNode
     //   Queries override material of this instance.
     virtual _smart_ptr<IMaterial> GetMaterial(Vec3* pHitPos = NULL) = 0;
     virtual _smart_ptr<IMaterial> GetMaterialOverride() = 0;
+    virtual void GetMaterials(AZStd::vector<_smart_ptr<IMaterial>>& materials)
+    {
+        _smart_ptr<IMaterial> currentMaterial = GetMaterialOverride();
+        if (!currentMaterial)
+        {
+            currentMaterial = GetMaterial();
+        }
+        if (currentMaterial)
+        {
+            materials.push_back(currentMaterial);
+        }
+    }
 
     // Used by the editor during export
     virtual void SetCollisionClassIndex(int tableIndex) {}
@@ -363,10 +375,8 @@ struct IRenderNode
         VM_Dynamic, // Real-time every-frame voxelization on GPU
     };
 
-#if defined(FEATURE_SVO_GI)
     virtual EVoxelGIMode GetVoxelGIMode() { return VM_None; }
     virtual void SetDesiredVoxelGIMode(EVoxelGIMode voxelMode) {}
-#endif
 
     virtual void SetMinSpec(int nMinSpec) { m_dwRndFlags &= ~ERF_SPEC_BITS_MASK; m_dwRndFlags |= (nMinSpec << ERF_SPEC_BITS_SHIFT) & ERF_SPEC_BITS_MASK; };
 
@@ -564,6 +574,7 @@ struct IVegetation
 struct IBrush
     : public IRenderNode
 {
+    virtual float GetScale(void) const = 0;
     virtual const Matrix34& GetMatrix() const = 0;
     virtual void SetDrawLast(bool enable) = 0;
 };
@@ -618,6 +629,13 @@ struct IRoadRenderNode
     virtual void GetClipPlanes(Plane* pPlanes, int nPlanesNum, int nVertId = 0) = 0;
     virtual void GetTexCoordInfo(float* pTexCoordInfo) = 0;
     // </interfuscator:shuffle>
+
+    // This flag is used to account for legacy entities which used to serialize the node without parent objects.
+    // Now there are runtime components which spawn the rendering node, however we need to support legacy code as well. 
+    // Remove this flag when legacy entities are removed entirely
+    bool m_hasToBeSerialised = true;
+    // Whether or not ends of the road should be faded out
+    bool m_bAlphaBlendRoadEnds = true;
 };
 
 // Summary:
@@ -735,6 +753,7 @@ struct SDecalProperties
         m_radius = 1.0f;
         m_depth = 1.0f;
         m_opacity = 1.0f;
+        m_angleAttenuation = 1.0f;
         m_maxViewDist = 8000.0f;
         m_minSpec = EngineSpec::Low;
     }
@@ -756,6 +775,7 @@ struct SDecalProperties
     float m_depth;
     const char* m_pMaterialName;
     float m_opacity;
+    float m_angleAttenuation;
     float m_maxViewDist;
     EngineSpec m_minSpec;
 };
@@ -820,6 +840,11 @@ struct IWaterVolumeRenderNode
 
     virtual IPhysicalEntity* SetAndCreatePhysicsArea(const Vec3* pVertices, unsigned int numVertices) = 0;
     // </interfuscator:shuffle>
+
+    // This flag is used to account for legacy entities which used to serialize the node without parent objects.
+    // Now there are runtime components which spawn the rendering node, however we need to support legacy code as well. 
+    // Remove this flag when legacy entities are removed entirely
+    bool m_hasToBeSerialised = true;
 };
 
 // Description:

@@ -53,6 +53,9 @@ namespace AssetProcessor
 
         GemInformation() = default;
         GemInformation(const char* identifier, const char* absolutePath, const char* relativePath, const char* displayName, bool isGameGem, bool assetOnlyGem);
+
+        static QString GetGemAssetFolder() { return QString("Assets"); }
+        static AZStd::string GemDirectoryFolderName() { return AZStd::string("Gems"); }
     };
 
     //! The data about a particular recognizer, including all platform specs.
@@ -220,6 +223,9 @@ namespace AssetProcessor
 
         //! given a full file name (assumed already fed through the normalization funciton), return the first matching scan folder
         const AssetProcessor::ScanFolderInfo* GetScanFolderForFile(const QString& fullFileName) const;
+
+        //! Given a scan folder path, get its complete info
+        const AssetProcessor::ScanFolderInfo* GetScanFolderByPath(const QString& scanFolderPath) const;
 
         const RecognizerContainer& GetAssetRecognizerContainer() const override;
 

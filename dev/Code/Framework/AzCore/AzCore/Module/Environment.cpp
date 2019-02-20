@@ -113,7 +113,7 @@ namespace AZ
                 }
 
 #ifdef AZ_ENVIRONMENT_VALIDATE_ON_EXIT
-                AZ_Assert(m_numAttached == 0, "We should not delete an evironment while there are %d modules attached! Unload all DLLs first!", m_numAttached);
+                AZ_Assert(m_numAttached == 0, "We should not delete an environment while there are %d modules attached! Unload all DLLs first!", m_numAttached);
 #endif
                 
                 for (auto variableIt : m_variableMap)
@@ -409,7 +409,6 @@ namespace AZ
             }
         }
 
-
         EnvironmentVariableResult AddAndAllocateVariable(u32 guid, size_t byteSize, size_t alignment, AZStd::recursive_mutex** addedVariableLock)
         {
             return EnvironmentImpl::Get()->AddAndAllocateVariable(guid, byteSize, alignment, addedVariableLock);
@@ -433,6 +432,11 @@ namespace AZ
 
     namespace Environment
     {
+        bool IsReady()
+        {
+            return Internal::EnvironmentInterface::s_environment != nullptr;
+        }
+
         EnvironmentInstance GetInstance()
         {
             return Internal::EnvironmentImpl::Get();

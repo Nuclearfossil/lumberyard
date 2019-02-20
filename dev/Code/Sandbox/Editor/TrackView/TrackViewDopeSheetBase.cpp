@@ -25,6 +25,9 @@
 #include <Maestro/Types/AnimValueType.h>
 #include <Maestro/Types/AnimParamType.h>
 #include <Maestro/Types/SequenceType.h>
+#include <AnimKey.h>
+#include <Maestro/Types/AssetBlendKey.h>
+#include <AzCore/std/sort.h>
 
 #include "Clipboard.h"
 
@@ -133,6 +136,11 @@ CTrackViewDopeSheetBase::CTrackViewDopeSheetBase(QWidget* parent)
 
     setMouseTracking(true);
     setFocusPolicy(Qt::StrongFocus);
+
+    m_colorDialog = new QColorDialog(this);
+    m_colorUpdateTrack = nullptr;
+    m_colorUpdateKeyTime = 0;
+    QObject::connect(m_colorDialog, &QColorDialog::currentColorChanged, this, &CTrackViewDopeSheetBase::OnCurrentColorChange);
 }
 
 //////////////////////////////////////////////////////////////////////////
@@ -140,6 +148,12 @@ CTrackViewDopeSheetBase::~CTrackViewDopeSheetBase()
 {
     HideKeyPropertyCtrlOnSpot();
     GetIEditor()->GetAnimation()->RemoveListener(this);
+
+    if (m_colorDialog)
+    {
+        delete m_colorDialog;
+        m_colorDialog = nullptr;
+    }
 }
 
 //////////////////////////////////////////////////////////////////////////
@@ -258,12 +272,15 @@ void CTrackViewDopeSheetBase::SetTimeScale(float timeScale, float fAnchorTime)
 
     float fCurrentOffset = -fAnchorTime * m_timeScale;
     m_scrollOffset.rx() += fOldOffset - fCurrentOffset;
+    m_scrollBar->setValue(m_scrollOffset.x());
 
     update();
 
     SetHorizontalExtent(-m_leftOffset, m_timeRange.end * m_timeScale);
 
     ComputeFrameSteps(GetVisibleRange());
+
+    OnHScroll();
 }
 
 void CTrackViewDopeSheetBase::showEvent(QShowEvent* event)
@@ -306,10 +323,10 @@ void CTrackViewDopeSheetBase::wheelEvent(QWheelEvent* event)
     }
 
     float z = (event->delta() > 0) ? (m_timeScale * 1.25f) : (m_timeScale * 0.8f);
-
-    const QPoint pt = event->pos();
-
-    float fAnchorTime = TimeFromPointUnsnapped(pt);
+    // Use m_mouseOverPos to get the local position in the timeline view instead of
+    // event->pos() which seems to include the variable left panel of the view that
+    // lists the tracks.
+    float fAnchorTime = TimeFromPointUnsnapped(m_mouseOverPos);
     SetTimeScale(z, fAnchorTime);
 
     event->accept();
@@ -512,7 +529,8 @@ void CTrackViewDopeSheetBase::OnLButtonDown(Qt::KeyboardModifiers modifiers, con
     {
         keyHandle = DurationKeyFromPoint(point);
     }
-    else
+
+    if (keyHandle.IsValid())
     {
         return LButtonDownOnKey(point, keyHandle, modifiers);
     }
@@ -590,8 +608,8 @@ void CTrackViewDopeSheetBase::OnLButtonUp(Qt::KeyboardModifiers modifiers, const
 //////////////////////////////////////////////////////////////////////////
 void CTrackViewDopeSheetBase::OnLButtonDblClk(Qt::KeyboardModifiers modifiers, const QPoint& point)
 {
-    CTrackViewSequence* pSequence = GetIEditor()->GetAnimation()->GetSequence();
-    if (!pSequence || m_rcTimeline.contains(point) || m_bEditLock)
+    CTrackViewSequence* sequence = GetIEditor()->GetAnimation()->GetSequence();
+    if (!sequence || m_rcTimeline.contains(point) || m_bEditLock)
     {
         return;
     }
@@ -604,27 +622,48 @@ void CTrackViewDopeSheetBase::OnLButtonDblClk(Qt::KeyboardModifiers modifiers, c
     }
     else
     {
-        GetIEditor()->BeginUndo();
-        CUndoAnimKeySelection* pUndoKeySelection = new CUndoAnimKeySelection(pSequence);
-        CUndo::Record(pUndoKeySelection);
+        CUndoAnimKeySelection* undoKeySelection = new CUndoAnimKeySelection(sequence);
 
         CTrackViewTrack* pTrack = GetTrackFromPoint(point);
         if (pTrack)
         {
-            CTrackViewSequenceNotificationContext context(pSequence);
-            pSequence->DeselectAllKeys();
-            keyHandle.Select(true);
+            CTrackViewSequenceNotificationContext context(sequence);
 
-            m_keyTimeOffset = 0;
-
-            if (pUndoKeySelection->IsSelectionChanged())
+            if (sequence->GetSequenceType() == SequenceType::Legacy)
             {
-                GetIEditor()->AcceptUndo("Select Key");
+                GetIEditor()->BeginUndo();
+                CUndo::Record(undoKeySelection);
+
+                sequence->DeselectAllKeys();
+                keyHandle.Select(true);
+
+                if (undoKeySelection->IsSelectionChanged())
+                {
+                    GetIEditor()->AcceptUndo("Select Key");
+                }
+                else
+                {
+                    GetIEditor()->CancelUndo();
+                }
             }
             else
             {
-                GetIEditor()->CancelUndo();
+                AzToolsFramework::ScopedUndoBatch undoBatch("Select key");
+
+                sequence->DeselectAllKeys();
+                keyHandle.Select(true);
+
+                if (undoKeySelection->IsSelectionChanged())
+                {
+                    undoBatch.MarkEntityDirty(sequence->GetSequenceComponentEntityId());
+                }
+
+                // Delete undo for non legacy sequences, for legacy sequences we need to 
+                // keep it around for the CUndo system.
+                delete undoKeySelection;
             }
+
+            m_keyTimeOffset = 0;
 
             if (pTrack->GetValueType() == AnimValueType::RGB)
             {
@@ -639,7 +678,7 @@ void CTrackViewDopeSheetBase::OnLButtonDblClk(Qt::KeyboardModifiers modifiers, c
                 bool bKeyChangeInSameTrack = m_pLastTrackSelectedOnSpot && pTrack == m_pLastTrackSelectedOnSpot;
                 m_pLastTrackSelectedOnSpot = pTrack;
 
-                ShowKeyPropertyCtrlOnSpot(p.x(), p.y(), pSequence->GetSelectedKeys().GetKeyCount() > 1, bKeyChangeInSameTrack);
+                ShowKeyPropertyCtrlOnSpot(p.x(), p.y(), sequence->GetSelectedKeys().GetKeyCount() > 1, bKeyChangeInSameTrack);
             }
         }
 
@@ -1011,19 +1050,22 @@ void CTrackViewDopeSheetBase::paintEvent(QPaintEvent* event)
 //////////////////////////////////////////////////////////////////////////
 void CTrackViewDopeSheetBase::SelectAllKeysWithinTimeFrame(const QRect& rc, const bool bMultiSelection)
 {
-    CTrackViewSequence* pSequence = GetIEditor()->GetAnimation()->GetSequence();
-    if (!pSequence)
+    CTrackViewSequence* sequence = GetIEditor()->GetAnimation()->GetSequence();
+    if (!sequence)
     {
         return;
     }
 
-    GetIEditor()->BeginUndo();
-    CUndoAnimKeySelection* pUndoKeySelection = new CUndoAnimKeySelection(pSequence);
-    CUndo::Record(pUndoKeySelection);
+    CUndoAnimKeySelection* undoKeySelection = new CUndoAnimKeySelection(sequence);
+    if (sequence->GetSequenceType() == SequenceType::Legacy)
+    {
+        GetIEditor()->BeginUndo();
+        CUndo::Record(undoKeySelection);
+    }
 
     if (!bMultiSelection)
     {
-        pSequence->DeselectAllKeys();
+        sequence->DeselectAllKeys();
     }
 
     // put selection rectangle from client to track space.
@@ -1032,9 +1074,9 @@ void CTrackViewDopeSheetBase::SelectAllKeysWithinTimeFrame(const QRect& rc, cons
 
     Range selTime = GetTimeRange(trackRect);
 
-    CTrackViewTrackBundle tracks = pSequence->GetAllTracks();
+    CTrackViewTrackBundle tracks = sequence->GetAllTracks();
 
-    CTrackViewSequenceNotificationContext context(pSequence);
+    CTrackViewSequenceNotificationContext context(sequence);
     for (int i = 0; i < tracks.GetCount(); ++i)
     {
         CTrackViewTrack* pTrack = tracks.GetTrack(i);
@@ -1052,13 +1094,28 @@ void CTrackViewDopeSheetBase::SelectAllKeysWithinTimeFrame(const QRect& rc, cons
         }
     }
 
-    if (pUndoKeySelection->IsSelectionChanged())
+    if (sequence->GetSequenceType() == SequenceType::Legacy)
     {
-        GetIEditor()->AcceptUndo("Select keys");
+        if (undoKeySelection->IsSelectionChanged())
+        {
+            GetIEditor()->AcceptUndo("Select keys");
+        }
+        else
+        {
+            GetIEditor()->CancelUndo();
+        }
     }
     else
     {
-        GetIEditor()->CancelUndo();
+        AzToolsFramework::ScopedUndoBatch undoBatch("Select keys");
+        if (undoKeySelection->IsSelectionChanged())
+        {
+            undoBatch.MarkEntityDirty(sequence->GetSequenceComponentEntityId());
+        }
+
+        // Delete undo for non legacy sequences, for legacy sequences we need to 
+        // keep it around for the CUndo system.
+        delete undoKeySelection;
     }
 }
 
@@ -1167,7 +1224,7 @@ CTrackViewNode* CTrackViewDopeSheetBase::GetNodeFromPointRec(CTrackViewNode* pCu
         return pCurrentNode;
     }
 
-    if (pCurrentNode->IsExpanded())
+    if (pCurrentNode->GetExpanded())
     {
         unsigned int childCount = pCurrentNode->GetChildCount();
         for (unsigned int i = 0; i < childCount; ++i)
@@ -1278,8 +1335,8 @@ void CTrackViewDopeSheetBase::StartPasteKeys()
 
 void CTrackViewDopeSheetBase::keyPressEvent(QKeyEvent* event)
 {
-    CTrackViewSequence* pSequence = GetIEditor()->GetAnimation()->GetSequence();
-    if (!pSequence)
+    CTrackViewSequence* sequence = GetIEditor()->GetAnimation()->GetSequence();
+    if (!sequence)
     {
         return;
     }
@@ -1288,13 +1345,13 @@ void CTrackViewDopeSheetBase::keyPressEvent(QKeyEvent* event)
     if (event->matches(QKeySequence::Delete))
     {
         CUndo undo("Delete Keys");
-        pSequence->DeleteSelectedKeys();
+        sequence->DeleteSelectedKeys();
         return;
     }
 
     if (event->key() == Qt::Key_Up || event->key() == Qt::Key_Down || event->key() == Qt::Key_Right || event->key() == Qt::Key_Left)
     {
-        CTrackViewKeyBundle keyBundle = pSequence->GetSelectedKeys();
+        CTrackViewKeyBundle keyBundle = sequence->GetSelectedKeys();
         CTrackViewKeyHandle keyHandle = keyBundle.GetSingleSelectedKey();
 
         if (keyHandle.IsValid())
@@ -1317,21 +1374,41 @@ void CTrackViewDopeSheetBase::keyPressEvent(QKeyEvent* event)
 
             if (keyHandle.IsValid())
             {
-                GetIEditor()->BeginUndo();
-                CUndoAnimKeySelection* pUndoKeySelection = new CUndoAnimKeySelection(pSequence);
-                CUndo::Record(pUndoKeySelection);
+                CUndoAnimKeySelection* undoKeySelection = new CUndoAnimKeySelection(sequence);
+                CTrackViewSequenceNotificationContext context(sequence);
 
-                CTrackViewSequenceNotificationContext context(pSequence);
-                pSequence->DeselectAllKeys();
-                keyHandle.Select(true);
-
-                if (pUndoKeySelection->IsSelectionChanged())
+                if (sequence->GetSequenceType() == SequenceType::Legacy)
                 {
-                    GetIEditor()->AcceptUndo("Select Key");
+                    GetIEditor()->BeginUndo();
+                    CUndo::Record(undoKeySelection);
+
+                    sequence->DeselectAllKeys();
+                    keyHandle.Select(true);
+
+                    if (undoKeySelection->IsSelectionChanged())
+                    {
+                        GetIEditor()->AcceptUndo("Select Key");
+                    }
+                    else
+                    {
+                        GetIEditor()->CancelUndo();
+                    }
                 }
                 else
                 {
-                    GetIEditor()->CancelUndo();
+                    AzToolsFramework::ScopedUndoBatch undoBatch("Select Key");
+
+                    sequence->DeselectAllKeys();
+                    keyHandle.Select(true);
+
+                    if (undoKeySelection->IsSelectionChanged())
+                    {
+                        undoBatch.MarkEntityDirty(sequence->GetSequenceComponentEntityId());
+                    }
+
+                    // Delete undo for non legacy sequences, for legacy sequences we need to 
+                    // keep it around for the CUndo system.
+                    delete undoKeySelection;
                 }
             }
         }
@@ -1341,7 +1418,7 @@ void CTrackViewDopeSheetBase::keyPressEvent(QKeyEvent* event)
 
     if (event->matches(QKeySequence::Copy))
     {
-        pSequence->CopyKeysToClipboard(true, false);
+        sequence->CopyKeysToClipboard(true, false);
     }
     else if (event->matches(QKeySequence::Paste))
     {
@@ -1495,8 +1572,8 @@ void CTrackViewDopeSheetBase::MouseMoveSelect(const QPoint& point)
 //////////////////////////////////////////////////////////////////////////
 void CTrackViewDopeSheetBase::MouseMoveStartEndTimeAdjust(const QPoint& p, bool bStart)
 {
-    CTrackViewSequence* pSequence = GetIEditor()->GetAnimation()->GetSequence();
-    if (!pSequence)
+    CTrackViewSequence* sequence = GetIEditor()->GetAnimation()->GetSequence();
+    if (!sequence)
     {
         return;
     }
@@ -1508,16 +1585,31 @@ void CTrackViewDopeSheetBase::MouseMoveStartEndTimeAdjust(const QPoint& p, bool 
 
     CTrackViewKeyHandle& keyHandle = m_keyForTimeAdjust;
 
+    // TODO: Refactor this Time Range Key stuff.
     ICharacterKey characterKey;
-    keyHandle.GetKey(&characterKey);
+    AZ::IAssetBlendKey assetBlendKey;
+    ITimeRangeKey* timeRangeKey = nullptr;
 
-    float& timeToAdjust = bStart ? characterKey.m_startTime : characterKey.m_endTime;
+    if (keyHandle.GetTrack()->GetValueType() == AnimValueType::AssetBlend)
+    {
+        keyHandle.GetKey(&assetBlendKey);
+        timeRangeKey = &assetBlendKey;
+    }
+    else
+    {
+        // This will work for both character & time range keys because
+        // ICharacterKey is derived from ITimeRangeKey. Not the most beautiful code.
+        keyHandle.GetKey(&characterKey);
+        timeRangeKey = &characterKey;
+    }
+
+    float& timeToAdjust = bStart ? timeRangeKey->m_startTime : timeRangeKey->m_endTime;
 
     // Undo the last offset.
     timeToAdjust += -m_keyTimeOffset;
 
     // Apply a new offset.
-    m_keyTimeOffset = (ofs.x() / m_timeScale) * characterKey.m_speed;
+    m_keyTimeOffset = (ofs.x() / m_timeScale) * timeRangeKey->m_speed;
     timeToAdjust += m_keyTimeOffset;
 
     // Check the validity.
@@ -1527,25 +1619,29 @@ void CTrackViewDopeSheetBase::MouseMoveStartEndTimeAdjust(const QPoint& p, bool 
         {
             timeToAdjust = 0;
         }
-        else if (timeToAdjust > characterKey.GetValidEndTime())
+        else if (timeToAdjust > timeRangeKey->GetValidEndTime())
         {
-            timeToAdjust = characterKey.GetValidEndTime();
+            timeToAdjust = timeRangeKey->GetValidEndTime();
         }
     }
     else
     {
-        if (timeToAdjust < characterKey.m_startTime)
+        float endTime = AZStd::min(timeRangeKey->GetValidEndTime(), timeRangeKey->m_duration);
+        if (timeToAdjust < timeRangeKey->m_startTime)
         {
-            timeToAdjust = characterKey.m_startTime;
+            timeToAdjust = timeRangeKey->m_startTime;
         }
-        else if (timeToAdjust > characterKey.GetValidEndTime())
+        else if (timeToAdjust > endTime)
         {
-            timeToAdjust = characterKey.GetValidEndTime();
+            timeToAdjust = endTime;
         }
     }
 
-    CUndo::Record(new CUndoTrackObject(m_keyForTimeAdjust.GetTrack(), pSequence));
-    keyHandle.SetKey(&characterKey);
+    if (sequence->GetSequenceType() == SequenceType::Legacy)
+    {
+        CUndo::Record(new CUndoTrackObject(m_keyForTimeAdjust.GetTrack(), sequence));
+    }
+    keyHandle.SetKey(timeRangeKey);
 
     update();
 }
@@ -1662,6 +1758,10 @@ void CTrackViewDopeSheetBase::MouseMoveMove(const QPoint& p, Qt::KeyboardModifie
         }
         m_keyTimeOffset = timeOffset;
     }
+
+    // The time of the selected keys has likely just changed. OnKeySelectionChanged() so the 
+    // UI elements of the key properties control will update.
+    pSequence->OnKeySelectionChanged();
 }
 
 void CTrackViewDopeSheetBase::MouseMoveDragTime(const QPoint& point, Qt::KeyboardModifiers modifiers)
@@ -1850,7 +1950,7 @@ void CTrackViewDopeSheetBase::SetScrollOffset(int hpos)
 //////////////////////////////////////////////////////////////////////////
 void CTrackViewDopeSheetBase::LButtonDownOnTimeAdjustBar(const QPoint& point, CTrackViewKeyHandle& keyHandle, bool bStart)
 {
-    CTrackViewSequence* pSequence = GetIEditor()->GetAnimation()->GetSequence();
+    CTrackViewSequence* sequence = GetIEditor()->GetAnimation()->GetSequence();
 
     m_keyTimeOffset = 0;
     m_keyForTimeAdjust = keyHandle;
@@ -1863,16 +1963,34 @@ void CTrackViewDopeSheetBase::LButtonDownOnTimeAdjustBar(const QPoint& point, CT
     }
     else
     {
+        // TODO: Refactor this Time Range Key stuff.
+        ICharacterKey characterKey;
+        AZ::IAssetBlendKey assetBlendKey;
+        ITimeRangeKey* timeRangeKey = nullptr;
+
+        if (keyHandle.GetTrack()->GetValueType() == AnimValueType::AssetBlend)
+        {
+            keyHandle.GetKey(&assetBlendKey);
+            timeRangeKey = &assetBlendKey;
+        }
+        else
+        {
+            // This will work for both character & time range keys because
+            // ICharacterKey is derived from ITimeRangeKey. Not the most beautiful code.
+            keyHandle.GetKey(&characterKey);
+            timeRangeKey = &characterKey;
+        }
+
         // In case of the end time, make it have a valid (not zero)
         // end time, first.
-        ICharacterKey animKey;
-        keyHandle.GetKey(&animKey);
-
-        if (animKey.m_endTime == 0)
+        if (timeRangeKey->m_endTime == 0)
         {
-            animKey.m_endTime = animKey.m_duration;
-            CUndo::Record(new CUndoTrackObject(keyHandle.GetTrack(), pSequence));
-            keyHandle.SetKey(&animKey);
+            timeRangeKey->m_endTime = timeRangeKey->m_duration;
+            if (sequence->GetSequenceType() == SequenceType::Legacy)
+            {
+                CUndo::Record(new CUndoTrackObject(keyHandle.GetTrack(), sequence));
+            }
+            keyHandle.SetKey(timeRangeKey);
         }
         m_mouseMode = eTVMouseMode_EndTimeAdjust;
     }
@@ -1882,25 +2000,50 @@ void CTrackViewDopeSheetBase::LButtonDownOnTimeAdjustBar(const QPoint& point, CT
 //////////////////////////////////////////////////////////////////////////
 void CTrackViewDopeSheetBase::LButtonDownOnKey(const QPoint& point, CTrackViewKeyHandle& keyHandle, Qt::KeyboardModifiers modifiers)
 {
-    CTrackViewSequence* pSequence = GetIEditor()->GetAnimation()->GetSequence();
+    CTrackViewSequence* sequence = GetIEditor()->GetAnimation()->GetSequence();
+    AZ_Assert(sequence, "Expected a valid sequence.");
 
     if (!keyHandle.IsSelected() && !(modifiers & Qt::ControlModifier))
     {
-        CUndo undo("Select Keys");
-        CUndoAnimKeySelection* pUndoKeySelection = new CUndoAnimKeySelection(pSequence);
-        CUndo::Record(pUndoKeySelection);
+        CTrackViewSequenceNotificationContext context(sequence);
+        CUndoAnimKeySelection* undoKeySelection = new CUndoAnimKeySelection(sequence);
 
-        CTrackViewSequenceNotificationContext context(pSequence);
-        pSequence->DeselectAllKeys();
-        m_bJustSelected = true;
-        m_keyTimeOffset = 0;
-        keyHandle.Select(true);
-
-        ChangeSequenceTrackSelection(pSequence, keyHandle.GetTrack());
-
-        if (!pUndoKeySelection->IsSelectionChanged())
+        if (sequence->GetSequenceType() == SequenceType::Legacy)
         {
-            undo.Cancel();
+            CUndo undo("Select Keys");
+            CUndo::Record(undoKeySelection);
+
+            sequence->DeselectAllKeys();
+            m_bJustSelected = true;
+            m_keyTimeOffset = 0;
+            keyHandle.Select(true);
+
+            ChangeSequenceTrackSelection(sequence, keyHandle.GetTrack());
+
+            if (!undoKeySelection->IsSelectionChanged())
+            {
+                undo.Cancel();
+            }
+        }
+        else
+        {
+            AzToolsFramework::ScopedUndoBatch undoBatch("Select keys");
+
+            sequence->DeselectAllKeys();
+            m_bJustSelected = true;
+            m_keyTimeOffset = 0;
+            keyHandle.Select(true);
+
+            ChangeSequenceTrackSelection(sequence, keyHandle.GetTrack());
+
+            if (undoKeySelection->IsSelectionChanged())
+            {
+                undoBatch.MarkEntityDirty(sequence->GetSequenceComponentEntityId());
+            }
+
+            // Delete undo for non legacy sequences, for legacy sequences we need to 
+            // keep it around for the CUndo system.
+            delete undoKeySelection;
         }
     }
     else
@@ -1910,7 +2053,7 @@ void CTrackViewDopeSheetBase::LButtonDownOnKey(const QPoint& point, CTrackViewKe
 
     /// Move/Clone Key Undo Begin
     GetIEditor()->BeginUndo();
-    pSequence->StoreUndoForTracksWithSelectedKeys();
+    sequence->StoreUndoForTracksWithSelectedKeys();
     StoreMementoForTracksWithSelectedKeys();
 
     if (modifiers & Qt::ShiftModifier)
@@ -1998,7 +2141,7 @@ bool CTrackViewDopeSheetBase::CreateColorKey(CTrackViewTrack* pTrack, float keyT
     if (dlg.exec() == QDialog::Accepted)
     {
         const QColor col = dlg.selectedColor();
-        ColorF colArray = ColorGammaToLinear(col) * 255.0f;
+        ColorF colArray(col.red(), col.green(), col.blue(), col.alpha());
 
         CTrackViewSequence* sequence = pTrack->GetSequence();
         if (nullptr != sequence)
@@ -2052,6 +2195,77 @@ bool CTrackViewDopeSheetBase::CreateColorKey(CTrackViewTrack* pTrack, float keyT
     return keyCreated;
 }
 
+void CTrackViewDopeSheetBase::OnCurrentColorChange(const QColor& color)
+{
+    // This is while the color picker is up 
+    // so we want to update the property but not store an undo
+    UpdateColorKey(color, false);
+}
+
+void CTrackViewDopeSheetBase::UpdateColorKey(const QColor& color, bool addToUndo)
+{
+    ColorF colArray(color.red(), color.green(), color.blue(), color.alpha());
+
+    CTrackViewSequence* sequence = m_colorUpdateTrack->GetSequence();
+    if (nullptr != sequence)
+    {
+        CTrackViewSequenceNotificationContext context(sequence);
+
+        if (sequence->GetSequenceType() == SequenceType::Legacy)
+        {
+            if (addToUndo)
+            {
+                RecordTrackUndoLegacy(m_colorUpdateTrack);
+            }
+            UpdateColorKeyHelper(colArray);
+        }
+        else
+        {
+            if (addToUndo)
+            {
+                AzToolsFramework::ScopedUndoBatch undoBatch("Set Key");
+                UpdateColorKeyHelper(colArray);
+                undoBatch.MarkEntityDirty(sequence->GetSequenceComponentEntityId());
+            }
+            else
+            {
+                UpdateColorKeyHelper(colArray);
+            }
+        }
+
+        // We want this to take affect now
+        if (!addToUndo)
+        {
+            GetIEditor()->GetAnimation()->ForceAnimation();
+        }
+    }
+}
+
+void CTrackViewDopeSheetBase::UpdateColorKeyHelper(const ColorF& color)
+{
+    const unsigned int numChildNodes = m_colorUpdateTrack->GetChildCount();
+    for (int i = 0; i < numChildNodes; ++i)
+    {
+        CTrackViewTrack* subTrack = static_cast<CTrackViewTrack*>(m_colorUpdateTrack->GetChild(i));
+        CTrackViewKeyHandle subTrackKey = subTrack->GetKeyByTime(m_colorUpdateKeyTime);
+        I2DBezierKey bezierKey;
+        if (subTrackKey.IsValid())
+        {
+            subTrackKey.GetKey(&bezierKey);
+        }
+        else
+        {
+            // no valid key found at this time - create Key
+            subTrackKey = subTrack->CreateKey(m_colorUpdateKeyTime);
+            subTrackKey.GetKey(&bezierKey);
+        }
+
+        bezierKey.value.x = m_colorUpdateKeyTime;
+        bezierKey.value.y = color[i];
+        subTrackKey.SetKey(&bezierKey);
+    }
+}
+
 void CTrackViewDopeSheetBase::EditSelectedColorKey(CTrackViewTrack* pTrack)
 {
     if (pTrack->IsCompoundTrack())
@@ -2059,75 +2273,30 @@ void CTrackViewDopeSheetBase::EditSelectedColorKey(CTrackViewTrack* pTrack)
         CTrackViewKeyBundle selectedKeyBundle = pTrack->GetSelectedKeys();
         if (selectedKeyBundle.GetKeyCount())
         {
+            m_colorUpdateTrack = pTrack;
             // init with the first selected key color
-            float keyTime = selectedKeyBundle.GetKey(0).GetTime();
+            m_colorUpdateKeyTime = selectedKeyBundle.GetKey(0).GetTime();
+
             Vec3  color;
-            pTrack->GetValue(keyTime, color);
+            pTrack->GetValue(m_colorUpdateKeyTime, color);
 
             const QColor defaultColor(clamp_tpl(FloatToIntRet(color.x), 0, 255),
                 clamp_tpl(FloatToIntRet(color.y), 0, 255),
                 clamp_tpl(FloatToIntRet(color.z), 0, 255));
-            QColorDialog dlg(defaultColor, this);
-            if (dlg.exec() == QDialog::Accepted)
+
+            m_colorDialog->setCurrentColor(defaultColor);
+
+            if (m_colorDialog->exec() == QDialog::Accepted)
             {
-                const QColor col = dlg.selectedColor();
-                ColorF colArray = ColorGammaToLinear(col) * 255.0f;
+                const QColor col = m_colorDialog->selectedColor();
 
-                CTrackViewSequence* sequence = pTrack->GetSequence();
-                if (nullptr != sequence)
-                {
-                    CTrackViewSequenceNotificationContext context(sequence);
-
-                    if (sequence->GetSequenceType() == SequenceType::Legacy)
-                    {
-                        RecordTrackUndoLegacy(pTrack);
-                        const unsigned int numChildNodes = pTrack->GetChildCount();
-                        for (int i = 0; i < numChildNodes; ++i)
-                        {
-                            CTrackViewTrack* subTrack = static_cast<CTrackViewTrack*>(pTrack->GetChild(i));
-                            CTrackViewKeyHandle subTrackKey = subTrack->GetKeyByTime(keyTime);
-                            I2DBezierKey bezierKey;
-                            if (subTrackKey.IsValid())
-                            {
-                                subTrackKey.GetKey(&bezierKey);
-                            }
-                            else
-                            {
-                                // no valid key found at this time - create Key
-                                subTrackKey = subTrack->CreateKey(keyTime);
-                                subTrackKey.GetKey(&bezierKey);
-                            }
-
-                            bezierKey.value = Vec2(keyTime, colArray[i]);
-                            subTrackKey.SetKey(&bezierKey);
-                        }
-                    }
-                    else
-                    {
-                        AzToolsFramework::ScopedUndoBatch undoBatch("Set Key");
-                        const unsigned int numChildNodes = pTrack->GetChildCount();
-                        for (int i = 0; i < numChildNodes; ++i)
-                        {
-                            CTrackViewTrack* subTrack = static_cast<CTrackViewTrack*>(pTrack->GetChild(i));
-                            CTrackViewKeyHandle subTrackKey = subTrack->GetKeyByTime(keyTime);
-                            I2DBezierKey bezierKey;
-                            if (subTrackKey.IsValid())
-                            {
-                                subTrackKey.GetKey(&bezierKey);
-                            }
-                            else
-                            {
-                                // no valid key found at this time - create Key
-                                subTrackKey = subTrack->CreateKey(keyTime);
-                                subTrackKey.GetKey(&bezierKey);
-                            }
-
-                            bezierKey.value = Vec2(keyTime, colArray[i]);
-                            subTrackKey.SetKey(&bezierKey);
-                        }
-                        undoBatch.MarkEntityDirty(sequence->GetSequenceComponentEntityId());
-                    }
-                }
+                // Moved bulk of method into helper to handle matching logic in QT callback and undo redo cases
+                UpdateColorKey(col, true);
+            }
+            else
+            {
+                // We canceled out of the color picker, revert to color held before opening it
+                UpdateColorKey(defaultColor, false);
             }
         }      
     }
@@ -2140,28 +2309,59 @@ void CTrackViewDopeSheetBase::AcceptUndo()
     {
         const QPoint mousePos = mapFromGlobal(QCursor::pos());
 
+        CTrackViewSequence* sequence = GetIEditor()->GetAnimation()->GetSequence();
+
         if (m_mouseMode == eTVMouseMode_Paste)
         {
             GetIEditor()->CancelUndo();
         }
         else if (m_mouseMode == eTVMouseMode_Move || m_mouseMode == eTVMouseMode_Clone)
         {
-            CTrackViewSequence* pSequence = GetIEditor()->GetAnimation()->GetSequence();
-
-            if (pSequence && m_bKeysMoved)
+            if (sequence && m_bKeysMoved)
             {
-                CUndo::Record(new CUndoAnimKeySelection(pSequence));
-                GetIEditor()->AcceptUndo("Move/Clone Keys");
+                if (sequence->GetSequenceType() == SequenceType::Legacy)
+                {
+                    CUndo::Record(new CUndoAnimKeySelection(sequence));
+                    GetIEditor()->AcceptUndo("Move/Clone Keys");
+                }
+                else
+                {
+                    // Cancel legacy Undo, it shouldn't have recored anything. We can strip away all of this
+                    // IsRecording() code path when we remove SequenceType::Legacy sequence support.
+                    GetIEditor()->CancelUndo();
+
+                    // Keys Moved, mark the sequence dirty to get an AZ undo event.
+                    AzToolsFramework::ScopedUndoBatch undoBatch("Move/Clone Keys");
+                    undoBatch.MarkEntityDirty(sequence->GetSequenceComponentEntityId());
+                }
             }
             else
             {
                 GetIEditor()->CancelUndo();
             }
         }
-        else if (m_mouseMode == eTVMouseMode_StartTimeAdjust
-                 || m_mouseMode == eTVMouseMode_EndTimeAdjust)
+        else if (m_mouseMode == eTVMouseMode_StartTimeAdjust || m_mouseMode == eTVMouseMode_EndTimeAdjust)
         {
-            GetIEditor()->AcceptUndo("Adjust Start/End Time of an Animation Key");
+            if (sequence)
+            {
+                if (sequence->GetSequenceType() == SequenceType::Legacy)
+                {
+                    GetIEditor()->AcceptUndo("Adjust Start/End Time of an Animation Key");
+                }
+                else
+                {
+                    // Cancel legacy Undo, it shouldn't have recored anything. We can strip away all of this
+                    // IsRecording() code path when we remove SequenceType::Legacy sequence support.
+                    GetIEditor()->CancelUndo();
+
+                    AzToolsFramework::ScopedUndoBatch undoBatch("Adjust Start/End Time of an Animation Key");
+                    undoBatch.MarkEntityDirty(sequence->GetSequenceComponentEntityId());
+                }
+            }
+            else
+            {
+                GetIEditor()->CancelUndo();
+            }
         }
     }
 
@@ -2355,7 +2555,7 @@ void CTrackViewDopeSheetBase::DrawNodesRecursive(CTrackViewNode* pNode, QPainter
         }
     }
 
-    if (pNode->IsExpanded())
+    if (pNode->GetExpanded())
     {
         unsigned int numChildren = pNode->GetChildCount();
         for (unsigned int i = 0; i < numChildren; ++i)
@@ -2729,6 +2929,12 @@ void CTrackViewDopeSheetBase::DrawSequenceTrack(const Range& timeRange, QPainter
 }
 
 //////////////////////////////////////////////////////////////////////////
+bool CTrackViewDopeSheetBase::CompareKeyHandleByTime(const CTrackViewKeyHandle &a, const CTrackViewKeyHandle &b)
+{
+    return a.GetTime() < b.GetTime();
+}
+
+//////////////////////////////////////////////////////////////////////////
 void CTrackViewDopeSheetBase::DrawKeys(CTrackViewTrack* pTrack, QPainter* painter, QRect& rect, Range& timeRange)
 {
     int numKeys = pTrack->GetKeyCount();
@@ -2745,10 +2951,18 @@ void CTrackViewDopeSheetBase::DrawKeys(CTrackViewTrack* pTrack, QPainter* painte
     FixedDynArray<float> drawnKeyTimes;
     drawnKeyTimes.set(ArrayT((float*)alloca(numKeys * sizeof(float)), numKeys));
 
+    AZStd::vector<CTrackViewKeyHandle> sortedKeys;
+    sortedKeys.reserve(numKeys);
+    for (int i = 0; i < numKeys; ++i)
+    {
+        sortedKeys.push_back(pTrack->GetKey(i));
+    }
+    AZStd::sort(sortedKeys.begin(), sortedKeys.end(), CompareKeyHandleByTime);
+
     // Draw keys.
     for (int i = 0; i < numKeys; ++i)
     {
-        CTrackViewKeyHandle keyHandle = pTrack->GetKey(i);
+        CTrackViewKeyHandle keyHandle = sortedKeys[i];
 
         const float time = keyHandle.GetTime();
         if (!stl::push_back_unique(drawnKeyTimes, time))
@@ -2765,8 +2979,19 @@ void CTrackViewDopeSheetBase::DrawKeys(CTrackViewTrack* pTrack, QPainter* painte
         int x1 = x + kDefaultWidthForDescription;
         CTrackViewKeyHandle nextKey = keyHandle.GetNextKey();
 
-        if (nextKey.IsValid())
+        int nextKeyIndex = i + 1;
+
+        // Skip over next keys that have the same time as the current key.
+        // If they have the same time it means they are keys from sub tracks
+        // in a compound track at the same time.
+        while (nextKeyIndex < numKeys && AZ::IsClose(sortedKeys[nextKeyIndex].GetTime(), time, AZ::g_fltEps))
         {
+            nextKeyIndex++;
+        }
+
+        if (nextKeyIndex < numKeys)
+        {
+            CTrackViewKeyHandle nextKey = sortedKeys[nextKeyIndex];
             x1 = TimeToClient(nextKey.GetTime()) - kSmallMargin;
         }
 
@@ -2976,7 +3201,9 @@ CTrackViewKeyHandle CTrackViewDopeSheetBase::CheckCursorOnStartEndTimeAdjustBar(
     CTrackViewTrack* pTrack = GetTrackFromPoint(point);
 
     if (!pTrack || (pTrack->GetParameterType() != AnimParamType::Animation &&
-                    pTrack->GetParameterType() != AnimParamType::TimeRanges && pTrack->GetValueType() != AnimValueType::CharacterAnim))
+                    pTrack->GetParameterType() != AnimParamType::TimeRanges && 
+                    pTrack->GetValueType() != AnimValueType::CharacterAnim &&
+                    pTrack->GetValueType() != AnimValueType::AssetBlend))
     {
         return CTrackViewKeyHandle();
     }
@@ -2999,8 +3226,27 @@ CTrackViewKeyHandle CTrackViewDopeSheetBase::CheckCursorOnStartEndTimeAdjustBar(
             continue;
         }
 
+        // TODO: Refactor this Time Range Key stuff.
+        ICharacterKey characterKey;
+        AZ::IAssetBlendKey assetBlendKey;
+        ITimeRangeKey* timeRangeKey = nullptr;
+
+        if (pTrack->GetValueType() == AnimValueType::AssetBlend)
+        {
+            keyHandle.GetKey(&assetBlendKey);
+            timeRangeKey = &assetBlendKey;
+        }
+        else
+        {
+            // This will work for both character & time range keys because
+            // ICharacterKey is derived from ITimeRangeKey. Not the most beautiful code.
+            keyHandle.GetKey(&characterKey);
+            timeRangeKey = &characterKey;
+        }
+
         int stime = TimeToClient(time);
-        int etime = TimeToClient(time + duration);
+        int etime = TimeToClient(time + AZStd::min(timeRangeKey->GetValidEndTime(), timeRangeKey->m_duration));
+
         if (point.x() >= stime - 3 && point.x() <= stime)
         {
             bStart = true;
@@ -3046,16 +3292,21 @@ int CTrackViewDopeSheetBase::NumKeysFromPoint(const QPoint& point)
 //////////////////////////////////////////////////////////////////////////
 void CTrackViewDopeSheetBase::SelectKeys(const QRect& rc, const bool bMultiSelection)
 {
-    CTrackViewSequence* pSequence = GetIEditor()->GetAnimation()->GetSequence();
+    CTrackViewSequence* sequence = GetIEditor()->GetAnimation()->GetSequence();
+    CUndoAnimKeySelection* undoKeySelection = new CUndoAnimKeySelection(sequence);
 
-    GetIEditor()->BeginUndo();
-    CUndoAnimKeySelection* pUndoKeySelection = new CUndoAnimKeySelection(pSequence);
-    CUndo::Record(pUndoKeySelection);
+    AZ_Assert(sequence != nullptr, "sequence should never be nullptr here");
 
-    CTrackViewSequenceNotificationContext context(pSequence);
+    if (sequence->GetSequenceType() == SequenceType::Legacy)
+    {
+        GetIEditor()->BeginUndo();
+        CUndo::Record(undoKeySelection);
+    }
+
+    CTrackViewSequenceNotificationContext context(sequence);
     if (!bMultiSelection)
     {
-        pSequence->DeselectAllKeys();
+        sequence->DeselectAllKeys();
     }
 
     // put selection rectangle from client to track space.
@@ -3063,7 +3314,7 @@ void CTrackViewDopeSheetBase::SelectKeys(const QRect& rc, const bool bMultiSelec
 
     Range selTime = GetTimeRange(rci);
 
-    CTrackViewTrackBundle tracks = pSequence->GetAllTracks();
+    CTrackViewTrackBundle tracks = sequence->GetAllTracks();
 
     // note the tracks to select for the keyHandles selected
     CTrackViewTrackBundle tracksToSelect;
@@ -3096,15 +3347,28 @@ void CTrackViewDopeSheetBase::SelectKeys(const QRect& rc, const bool bMultiSelec
         }
     }
 
-    ChangeSequenceTrackSelection(pSequence, tracksToSelect, bMultiSelection);
+    ChangeSequenceTrackSelection(sequence, tracksToSelect, bMultiSelection);
 
-    if (pUndoKeySelection->IsSelectionChanged())
+    if (sequence->GetSequenceType() == SequenceType::Legacy)
     {
-        GetIEditor()->AcceptUndo("Select keys");
+        if (undoKeySelection->IsSelectionChanged())
+        {
+            GetIEditor()->AcceptUndo("Select keys");
+        }
+        else
+        {
+            GetIEditor()->CancelUndo();
+        }
     }
     else
     {
-        GetIEditor()->CancelUndo();
+        if (undoKeySelection->IsSelectionChanged())
+        {
+            AzToolsFramework::ScopedUndoBatch undoBatch("Select keys");
+            undoBatch.MarkEntityDirty(sequence->GetSequenceComponentEntityId());
+        }
+
+        delete undoKeySelection;
     }
 }
 
@@ -3523,23 +3787,37 @@ void CTrackViewDopeSheetBase::DrawKeyDuration(CTrackViewTrack* pTrack, QPainter*
     painter->setBrush(prevBrush);
     painter->drawLine(x1, rc.top(), x1, rc.bottom());
 
+    bool typeHasAnimBox = pTrack->GetParameterType() == AnimParamType::Animation ||
+        pTrack->GetParameterType() == AnimParamType::TimeRanges ||
+        pTrack->GetValueType() == AnimValueType::CharacterAnim ||
+        pTrack->GetValueType() == AnimValueType::AssetBlend;
+
     // If it is a selected animation track, draw the whole animation box (in green)
     // and two adjust bars (in red) for start/end time each, too.
-    if (keyHandle.IsSelected() && (pTrack->GetParameterType() == AnimParamType::Animation
-                                   || pTrack->GetParameterType() == AnimParamType::TimeRanges || pTrack->GetValueType() == AnimValueType::CharacterAnim))
+    if (keyHandle.IsSelected() && typeHasAnimBox)
     {
         // Draw the whole animation box.
 
-        // This will work for both character & time range keys because
-        // ICharacterKey is derived from ITimeRangeKey. Not the most beautiful code.
+        // TODO: Refactor this Time Range Key stuff.
         ICharacterKey characterKey;
-        keyHandle.GetKey(&characterKey);
+        AZ::IAssetBlendKey assetBlendKey;
+        ITimeRangeKey* timeRangeKey = nullptr;
 
-        // Make sure to only use time range elements of struct
-        ITimeRangeKey& timeRangeKey = characterKey;
+        if (pTrack->GetValueType() == AnimValueType::AssetBlend)
+        {
+            keyHandle.GetKey(&assetBlendKey);
+            timeRangeKey = &assetBlendKey;
+        }
+        else
+        {
+            // This will work for both character & time range keys because
+            // ICharacterKey is derived from ITimeRangeKey. Not the most beautiful code.
+            keyHandle.GetKey(&characterKey);
+            timeRangeKey = &characterKey;
+        }
 
-        int startX = TimeToClient(time - timeRangeKey.m_startTime / timeRangeKey.m_speed);
-        int endX = TimeToClient(time + (timeRangeKey.m_duration - timeRangeKey.m_startTime) / timeRangeKey.m_speed);
+        int startX = TimeToClient(time - timeRangeKey->m_startTime / timeRangeKey->m_speed);
+        int endX = TimeToClient(time + (timeRangeKey->m_duration - timeRangeKey->m_startTime) / timeRangeKey->m_speed);
         const QPen prevPen = painter->pen();
         painter->setPen(Qt::green);
         painter->drawLine(startX, rc.top(), endX, rc.top());
@@ -3548,7 +3826,7 @@ void CTrackViewDopeSheetBase::DrawKeyDuration(CTrackViewTrack* pTrack, QPainter*
         painter->drawLine(startX, rc.bottom(), startX, rc.top());
 
         // Draw two adjust bars.
-        int durationX = TimeToClient(time + duration);
+        int durationX = TimeToClient(time + AZStd::min(timeRangeKey->GetValidEndTime(), timeRangeKey->m_duration));
         painter->setPen(QPen(Qt::red, 3));
         painter->drawLine(x - 2, rc.top(), x - 2, rc.bottom());
         painter->drawLine(durationX + 2, rc.top(), durationX + 2, rc.bottom());

@@ -15,6 +15,18 @@
 #include "CustomMemoryHeap.h"
 
 
+#if defined(AZ_RESTRICTED_PLATFORM)
+#undef AZ_RESTRICTED_SECTION
+#define CUSTOMMEMORYHEAP_CPP_SECTION_1 1
+#define CUSTOMMEMORYHEAP_CPP_SECTION_2 2
+#define CUSTOMMEMORYHEAP_CPP_SECTION_3 3
+#endif
+
+#if defined(AZ_RESTRICTED_PLATFORM)
+#define AZ_RESTRICTED_SECTION CUSTOMMEMORYHEAP_CPP_SECTION_1
+#include AZ_RESTRICTED_FILE(CustomMemoryHeap_cpp, AZ_RESTRICTED_PLATFORM)
+#endif
+
 //////////////////////////////////////////////////////////////////////////
 CCustomMemoryHeapBlock::CCustomMemoryHeapBlock(CCustomMemoryHeap* pHeap)
     : m_pHeap(pHeap)
@@ -60,10 +72,13 @@ ICustomMemoryBlock* CCustomMemoryHeap::AllocateBlock(size_t const nAllocateSize,
     switch (m_eAllocPolicy)
     {
     case IMemoryManager::eapDefaultAllocator:
-        pBlock->m_pData = malloc(nAllocateSize);
+    {
+        size_t allocated = 0;
+        pBlock->m_pData = CryMalloc(nAllocateSize, allocated, nAlignment);
         break;
+    }
     case IMemoryManager::eapPageMapped:
-        pBlock->m_pData = CryGetIMemoryManager()->AllocPages(nAllocateSize);
+        pBlock->m_pData = CryMemory::AllocPages(nAllocateSize);
         break;
     case IMemoryManager::eapCustomAlignment:
 #if defined(DEBUG)
@@ -74,6 +89,10 @@ ICustomMemoryBlock* CCustomMemoryHeap::AllocateBlock(size_t const nAllocateSize,
 #endif
         pBlock->m_pData = CryModuleMemalign(nAllocateSize, nAlignment);
         break;
+#if defined(AZ_RESTRICTED_PLATFORM)
+#define AZ_RESTRICTED_SECTION CUSTOMMEMORYHEAP_CPP_SECTION_2
+#include AZ_RESTRICTED_FILE(CustomMemoryHeap_cpp, AZ_RESTRICTED_PLATFORM)
+#endif
     default:
         CryFatalError("CCustomMemoryHeap: unknown allocation policy during AllocateBlock!");
         break;
@@ -89,14 +108,18 @@ void CCustomMemoryHeap::DeallocateBlock(CCustomMemoryHeapBlock* pBlock)
     switch (m_eAllocPolicy)
     {
     case IMemoryManager::eapDefaultAllocator:
-        free(pBlock->m_pData);
+        CryFree(pBlock->m_pData, 0);
         break;
     case IMemoryManager::eapPageMapped:
-        CryGetIMemoryManager()->FreePages(pBlock->m_pData, pBlock->GetSize());
+        CryMemory::FreePages(pBlock->m_pData, pBlock->GetSize());
         break;
     case IMemoryManager::eapCustomAlignment:
         CryModuleMemalignFree(pBlock->m_pData);
         break;
+#if defined(AZ_RESTRICTED_PLATFORM)
+#define AZ_RESTRICTED_SECTION CUSTOMMEMORYHEAP_CPP_SECTION_3
+#include AZ_RESTRICTED_FILE(CustomMemoryHeap_cpp, AZ_RESTRICTED_PLATFORM)
+#endif
     default:
         CryFatalError("CCustomMemoryHeap: unknown allocation policy during DeallocateBlock!");
         break;

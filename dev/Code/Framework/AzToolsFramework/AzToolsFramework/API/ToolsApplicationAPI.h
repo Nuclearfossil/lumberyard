@@ -24,6 +24,7 @@
 #include <AzCore/Component/EntityId.h>
 #include <AzCore/Component/ComponentBus.h>
 #include <AzCore/std/containers/vector.h>
+#include <AzCore/Slice/SliceComponent.h>
 #include <AzCore/Outcome/Outcome.h>
 #include <AzToolsFramework/UI/PropertyEditor/PropertyEditorAPI.h>
 #include <AzToolsFramework/SourceControl/SourceControlAPI.h>
@@ -83,9 +84,10 @@ namespace AzToolsFramework
 
         /*!
          * Fired after committing a change in entity selection set.
+         * \param EntityIdList the list of newly selected entity Ids
+         * \param EntityIdList the list of newly deselected entity Ids
          */
-        virtual void AfterEntitySelectionChanged() {}
-
+        virtual void AfterEntitySelectionChanged(const EntityIdList& /*newlySelectedEntities*/, const EntityIdList& /*newlyDeselectedEntities*/) {}
 
         /*!
         * Fired before committing a change in entity highlighting set.
@@ -238,6 +240,11 @@ namespace AzToolsFramework
         virtual void FlushUndo() = 0;
 
         /*!
+        * Notifies the application that the redo stack needs to be sliced (removed)
+        */
+        virtual void FlushRedo() = 0;
+
+        /*!
          * Notifies the application that the user has selected an entity.
          * \param entityId - the Id of the newly selected entity.
          */
@@ -299,6 +306,11 @@ namespace AzToolsFramework
          * Not yet implemented in ToolsApplication.
          */
         virtual SourceControlFileInfo GetSceneSourceControlInfo() = 0;
+
+        /*!
+         * Returns true if any entities are selected, false if no entities are selected.
+         */
+        virtual bool AreAnyEntitiesSelected() = 0;
 
         /*!
          * Retrieves the set of selected entities.
@@ -418,6 +430,21 @@ namespace AzToolsFramework
         virtual void FindTopLevelEntityIdsInactive(const EntityIdList& entityIdsToCheck, EntityIdList& topLevelEntityIds) = 0;
 
         /**
+         * Check every entity to see if they all belong to the same slice instance, if so return that slice instance address, otherwise return null.
+         * @param entityIds An group of EntityIds.
+         * @return The slice instance address if all of \ref entityIds belongs to the same slice instance, otherwise null.
+         */
+        virtual AZ::SliceComponent::SliceInstanceAddress FindCommonSliceInstanceAddress(const EntityIdList& entityIds) = 0;
+
+        /**
+         * Get the id of the root entity of a slice instance. 
+         * This function ignores any unpushed change made to the transform hierarchy of the entities in the slice instance in question.
+         * @param sliceAddress The address of a slice instance.
+         * @return The root entity id.
+         */
+        virtual AZ::EntityId GetRootEntityIdOfSliceInstance(AZ::SliceComponent::SliceInstanceAddress sliceAddress) = 0;
+
+        /**
         * Prepares a file for editability. Interacts with source-control if the asset is not already writable, in a blocking fashion.
         * \param path full path of the asset to be made editable.
         * \param progressMessage progress message to display during checkout operation.
@@ -468,9 +495,26 @@ namespace AzToolsFramework
         virtual bool IsEngineRootExternal() const = 0;
 
         /**
-        * TEMP
+        * Creates and adds a new entity to the tools application from components which match at least one of the requiredTags
+        * The tag matching occurs on AZ::Edit::SystemComponentTags attribute from the reflected class data in the serialization context
         */
-        virtual AZ::Outcome<AZStd::string, AZStd::string> ResolveToolPath(const char* currentExecutablePath, const char* toolApplicationName) const = 0;
+        virtual void CreateAndAddEntityFromComponentTags(const AZStd::vector<AZ::Crc32>& requiredTags, const char* entityName) = 0;
+
+        /**
+        * Attempts to resolve a path to an executable using these known locations:
+        *   1) The current executable's folder
+        *   2) The Tools/LmbrSetup folder
+        */
+        virtual AZ::Outcome<AZStd::string, AZStd::string> ResolveConfigToolsPath(const char* toolApplicationName) const = 0;
+
+        /**
+        * @deprecated
+        */
+        AZ::Outcome<AZStd::string, AZStd::string> AZ_DEPRECATED(ResolveToolPath(const char* currentExecutablePath, const char* toolApplicationName) const, "ToolsApplicationRequests::ResolveToolPath is deprecated. Please use ToolsApplicationRequests::ResolveConfigToolsPath")
+        {
+            AZ_UNUSED(currentExecutablePath);
+            return ResolveConfigToolsPath(toolApplicationName);
+        };
     };
 
     using ToolsApplicationRequestBus = AZ::EBus<ToolsApplicationRequests>;
@@ -632,6 +676,14 @@ namespace AzToolsFramework
         /// Retrieve main editor interface.
         virtual IEditor* GetEditor() { return nullptr; }
 
+        virtual bool GetUndoSliceOverrideSaveValue() { return false; }
+
+        /// Retrieve the setting for messaging
+        virtual bool GetShowCircularDependencyError() { return true; }
+
+        /// Hide or show the circular dependency error when saving slices
+        virtual void SetShowCircularDependencyError(const bool& /*showCircularDependencyError*/) {}
+
         virtual void SetEditTool(const char* /*tool*/) {}
 
         /// Launches the Lua editor and opens the specified (space separated) files.
@@ -639,6 +691,9 @@ namespace AzToolsFramework
 
         /// Returns whether a level document is open.
         virtual bool IsLevelDocumentOpen() { return false; }
+
+        /// Return the name of a level document.
+        virtual AZStd::string GetLevelName() { return AZStd::string(); }
 
         /// Return default icon to show in the viewport for components that haven't specified an icon.
         virtual AZStd::string GetDefaultComponentViewportIcon() { return AZStd::string(); }
@@ -668,16 +723,36 @@ namespace AzToolsFramework
         virtual void GenerateNavigationArea(const AZStd::string& /*name*/, const AZ::Vector3& /*position*/, const AZ::Vector3* /*points*/, size_t /*numPoints*/, float /*height*/) { }
 
         /**
-         * Return all available agent types defined in the Navigation xml file.
+         * Calculate the navigation 2D radius in units of an agent given its Navigation Type Name
+         * @param angentTypeName         the name that identifies the agent navigation type
+         * @return the 2D horizontal radius of the agent, -1 if not found
          */
-        virtual AZStd::vector<AZStd::string> GetAgentTypes() { return AZStd::vector<AZStd::string>(); }
+        virtual float CalculateAgentNavigationRadius(const char* /*angentTypeName*/) { return -1; }
+
+        /**
+         * Retrieve the default agent Navigation Type Name
+         * @return the string identifying an agent navigation type
+         */
+        virtual const char* GetDefaultAgentNavigationTypeName() { return ""; }
         
         virtual void OpenPinnedInspector(const AzToolsFramework::EntityIdList& /*entities*/) { }
 
         virtual void ClosePinnedInspector(AzToolsFramework::EntityPropertyEditor* /*editor*/) {}
 
-        /// Focus all viewports on the list of entities
+        /// Return all available agent types defined in the Navigation xml file.
+        virtual AZStd::vector<AZStd::string> GetAgentTypes() { return AZStd::vector<AZStd::string>(); }
+
+        /// Focus all viewports on the selected and highlighted entities
         virtual void GoToSelectedOrHighlightedEntitiesInViewports() { }
+
+        /// Focus all viewports on the selected entities
+        virtual void GoToSelectedEntitiesInViewports() { }
+
+        /// Returns the world-space position under the center of the render viewport.
+        virtual AZ::Vector3 GetWorldPositionAtViewportCenter() { return AZ::Vector3::CreateZero(); }
+
+        /// Clears current redo stack
+        virtual void ClearRedoStack() {}
     };
 
     using EditorRequestBus = AZ::EBus<EditorRequests>;
@@ -715,6 +790,9 @@ namespace AzToolsFramework
 
         /// Notify that the Qt Application object is now ready to be used
         virtual void NotifyQtApplicationAvailable(QApplication* /* application */) {}
+
+        /// Notify that the IEditor is ready
+        virtual void NotifyIEditorAvailable(IEditor* /*editor*/) {}
     };
 
     /**
@@ -727,6 +805,8 @@ namespace AzToolsFramework
     class ScopedUndoBatch
     {
     public:
+        AZ_CLASS_ALLOCATOR(ScopedUndoBatch, AZ::SystemAllocator, 0);
+
         explicit ScopedUndoBatch(const char* batchName)
         {
             ToolsApplicationRequests::Bus::BroadcastResult(

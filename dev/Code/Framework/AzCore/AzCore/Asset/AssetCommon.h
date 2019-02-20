@@ -114,15 +114,8 @@ namespace AZ
             virtual ~AssetData()
             {}
 
-            AZ_FORCE_INLINE void Acquire() { ++m_useCount; }
-            AZ_FORCE_INLINE void Release()
-            {
-                AZ_Assert(m_useCount > 0, "Usecount is already 0!");
-                if (--m_useCount == 0)
-                {
-                    RemoveFromDB();
-                }
-            }
+            void Acquire();
+            void Release();
 
             /// Asset is loaded and ready for use.
             /// Note that the asset may be ready for use before the OnAssetReady
@@ -161,15 +154,17 @@ namespace AZ
         };
 
         /**
-         * Flags you can use for each instance (Asset<X>) to help with
-         * systems that load/etc. the asset (i.e. ObjectStream)
+         * Setting for each reference (Asset<T>) to control loading of referenced assets during serialization.
          */
-        enum class AssetFlags : u8
+        enum class AssetLoadBehavior : u8
         {
-            OBJECTSTREAM_PRE_LOAD = 0, ///< default, objectstream will pre-load the asset before returning the object to the user
-            OBJECTSTREAM_QUEUE_LOAD = 1, ///< objectstream will queue a load and return the object to the user. User code will need to check if the asset is ready
-            OBJECTSTREAM_NO_LOAD = 2, ///< object stream will load the ID. Asset loading will be left to the user.
-            OBJECTSTREAM_MASK = 0x03,
+            Default     = 0,
+
+            PreLoad     = Default,  ///< Default, serializer will pre-load the referenced asset before returning the owning object to the user.
+            QueueLoad   = 1,        ///< Serializer will queue an asynchronous load of the referenced asset and return the object to the user. User code should use the \ref AZ::Data::AssetBus to monitor for when it's ready.
+            NoLoad      = 2,        ///< Serializer will load reference information, but asset loading will be left to the user. User code should call Asset<T>::QueueLoad and use the \ref AZ::Data::AssetBus to monitor for when it's ready.
+
+            Count,
         };
 
         /// Can be provided as a predicate for asset filtering or visiting.
@@ -196,8 +191,8 @@ namespace AZ
             AZ_TYPE_INFO(Asset, "{C891BF19-B60C-45E2-BFD0-027D15DDC939}", T);
             /// Create asset with default params (no asset bounded)
             /// By default, referenced assets will be preloaded during serialization.
-            /// Use \ref AZ::Data::AssetFlags to control this behavior.
-            Asset(u8 flags = static_cast<u8>(AssetFlags::OBJECTSTREAM_PRE_LOAD));
+            /// Use \ref AssetLoadBehavior to control this behavior.
+            Asset(AssetLoadBehavior loadBehavior = AssetLoadBehavior::PreLoad);
             /// Create an asset from a valid asset data (created asset), might not be loaded or currently loading.
             Asset(AssetData* assetData);
             /// Initialize asset pointer with id, type, and hint. No data construction will occur until QueueLoad is called.
@@ -229,6 +224,7 @@ namespace AZ
             const AssetId& GetId() const;       ///< Retrieve the Id of the referenced asset.
             const AssetType& GetType() const;   ///< Retrieve the type of the referenced asset (if available).
             const AZStd::string& GetHint() const; ///< Retrieve the last known path to the asset Id this ref is bound to
+            void SetHint(const AZStd::string& newHint);
 
             /// Returns asset data - base class
             AssetData* GetData() const;
@@ -275,10 +271,23 @@ namespace AZ
              */
             bool Save();
 
+            /**
+             * Sets the auto load behavior for the asset reference.
+             * \param \ref AssetLoadBehavior
+             */
+            void SetAutoLoadBehavior(AssetLoadBehavior loadBehavior);
+
+            /**
+             * \return auto load behavior for the asset reference.
+             */
+            AssetLoadBehavior GetAutoLoadBehavior() const;
+
             /// Returns asset instance flags
+            /// Deprecated - use GetAutoLoadBehavior
             u8 GetFlags() const;
 
             /// You can change the flags only when we don't have an asset bound (ie. GetData() == null)
+            /// Deprecated - use SetAutoLoadBehavior
             bool SetFlags(u8 flags);
 
             /**
@@ -288,22 +297,60 @@ namespace AZ
             */
             void UpgradeAssetInfo();
 
+            /** 
+            * for debugging purposes - creates a string that represents the assets id, subid, hint, and name.
+            * You should use this function for any time you want to show the full details of an asset in a log message
+            * as it will always produce a consistent output string.  By convention, don't surround the output of this call
+            * with any kind of decorator, (for example, dont format like [%s]) becuase decorators are built-in.
+            */
+            template<class StringType>
+            StringType ToString() const;
+
+            /**
+            * for debugging purposes only - udpates a string that represents the asset's id, subid, hint and name.
+            * see comment details on StringType ToString() above.
+            */
+            template<class StringType>
+            void ToString(StringType& result) const;
+
         protected:
 
             void SetData(AssetData* assetData);
 
             void swap(Asset& rhs);
 
-            AssetId m_assetId;      ///< Id of asset the pointer currently references. QueueLoad will acquire/load the actual asset.
-            AssetType m_assetType;  ///< Referenced asset type.
-            AssetData* m_assetData; ///< Pointer to the asset data, it's always present when we have bound an asset (it doesn't have to be loaded)
-            u8 m_flags; ///< Flags per instance, used to control serializer/object stream loading behavior \ref AssetFlags
-            AZStd::string m_assetHint; ///< Last known path to the asset m_assetId refers to
+            AssetId m_assetId;                      ///< Id of asset the pointer currently references. QueueLoad will acquire/load the actual asset.
+            AssetType m_assetType;                  ///< Referenced asset type.
+            AssetData* m_assetData = nullptr;       ///< Pointer to the asset data, it's always present when we have bound an asset (it doesn't have to be loaded)
+            AssetLoadBehavior m_loadBehavior;       ///< Load behavior for the asset reference
+            AZStd::string m_assetHint;              ///< Last known path to the asset m_assetId refers to
         };
 
         template<typename T, typename U>
         Asset<T> static_pointer_cast(const Asset<U>& p) { return Asset<T>(p); }
 
+        //=========================================================================
+        template<class T>
+        template<class StringType>
+        inline StringType Asset<T>::ToString() const
+        {
+            StringType result;
+            ToString(result);
+            return result;
+        }
+
+        //=========================================================================
+        template<class T>
+        template<class StringType>
+        inline void Asset<T>::ToString(StringType& result) const
+        {
+            if (m_assetHint.empty())
+            {
+                result = StringType::format("[AssetId=%s Type=%s]", m_assetId.ToString<StringType>().c_str(), GetType().template ToString<StringType>().c_str());
+            }
+
+            result = StringType::format("['%s' AssetId=%s Type=%s]", m_assetHint.c_str(), m_assetId.ToString<StringType>().c_str(), GetType().template ToString<StringType>().c_str());
+        }
 
         namespace AssetInternal
         {
@@ -376,19 +423,31 @@ namespace AZ
 
             /// Called when an asset is loaded, patched and ready to be used.
             virtual void OnAssetReady(Asset<AssetData> asset) { (void)asset; }
+            
             /// Called when an asset has been moved (usually due to de-fragmentation/compaction), if possible the only data pointer is provided otherwise NULL.
             virtual void OnAssetMoved(Asset<AssetData> asset, void* oldDataPointer) { (void)asset; (void)oldDataPointer; }
+            
             /// Called before an asset reload has started.
             virtual void OnAssetPreReload(Asset<AssetData> asset) { (void)asset; }
+            
             /// Called when an asset has been reloaded (usually in tool mode and loose more). It should not be called in final build.
             virtual void OnAssetReloaded(Asset<AssetData> asset) { (void)asset; }
+            
             /// Called when an asset failed to reload.
             virtual void OnAssetReloadError(Asset<AssetData> asset) { (void)asset; }
+            
             /// Called when an asset has been saved. In general most assets can't be saved (in a game) so make sure you check the flag.
             virtual void OnAssetSaved(Asset<AssetData> asset, bool isSuccessful) { (void)asset; (void)isSuccessful; }
+            
             /// Called when an asset is unloaded.
             virtual void OnAssetUnloaded(const AssetId assetId, const AssetType assetType) { (void)assetId; (void)assetType; }
-            /// Called when an error happened with an asset. When this message is received the asset should be considered broken by default.
+            
+            /** 
+            * Called when an error happened with an asset. When this message is received the asset should be considered broken by default.
+            * Note that this can happen when the asset erros during load, but also happens when the asset is missing (not in catalog etc.)
+            * in the case of an asset that is completly missing, the Asset<T> passed in here will have no hint or other information about
+            * the asset since completely missing assets are not registered in the asset manager's database or the catalog.
+            */
             virtual void OnAssetError(Asset<AssetData> asset) { (void)asset; }
         };
 
@@ -464,10 +523,7 @@ namespace AZ
         template<class StringType>
         inline void AssetId::ToString(StringType& result) const
         {
-            m_guid.ToString(result);
-            char subIdBuffer[16];
-            azsnprintf(subIdBuffer, AZ_ARRAY_SIZE(subIdBuffer), ":%x", m_subId);
-            result += subIdBuffer;
+            result = StringType::format("%s:%x", m_guid.ToString<StringType>().c_str(), m_subId);
         }
 
         //=========================================================================
@@ -514,10 +570,9 @@ namespace AZ
          */
         //=========================================================================
         template<class T>
-        Asset<T>::Asset(u8 flags)
+        Asset<T>::Asset(AssetLoadBehavior loadBehavior)
             : m_assetType(azrtti_typeid<T>())
-            , m_assetData(nullptr)
-            , m_flags(flags)
+            , m_loadBehavior(loadBehavior)
         {
             AZ_STATIC_ASSERT((AZStd::is_base_of<AssetData, T>::value), "Can only specify desired type if asset type is AssetData");
         }
@@ -526,8 +581,7 @@ namespace AZ
         template<class T>
         Asset<T>::Asset(AssetData* assetData)
             : m_assetType(azrtti_typeid<T>())
-            , m_assetData(nullptr)
-            , m_flags(0)
+            , m_loadBehavior(AssetLoadBehavior::Default)
         {
             SetData(assetData);
         }
@@ -537,8 +591,7 @@ namespace AZ
         Asset<T>::Asset(const AssetId& id, const AZ::Data::AssetType& type, const AZStd::string& hint)
             : m_assetId(id)
             , m_assetType(type)
-            , m_assetData(nullptr)
-            , m_flags(0)
+            , m_loadBehavior(AssetLoadBehavior::Default)
             , m_assetHint(hint)
         {
         }
@@ -548,8 +601,7 @@ namespace AZ
         Asset<T>::Asset(const Asset& rhs)
             : m_assetId(rhs.m_assetId)
             , m_assetType(rhs.m_assetType)
-            , m_assetData(nullptr)
-            , m_flags(rhs.m_flags)
+            , m_loadBehavior(rhs.m_loadBehavior)
             , m_assetHint(rhs.m_assetHint)
         {
             SetData(rhs.m_assetData);
@@ -561,8 +613,7 @@ namespace AZ
         Asset<T>::Asset(const Asset<U>& rhs)
             : m_assetId(rhs.m_assetId)
             , m_assetType(rhs.m_assetType)
-            , m_assetData(nullptr)
-            , m_flags(rhs.m_flags)
+            , m_loadBehavior(rhs.m_loadBehavior)
             , m_assetHint(rhs.m_assetHint)
         {
             SetData(rhs.m_assetData);
@@ -572,35 +623,44 @@ namespace AZ
         //=========================================================================
         template<class T>
         Asset<T>::Asset(Asset&& rhs)
-            : m_assetId(AZStd::move(rhs.m_assetId))
-            , m_assetType(AZStd::move(rhs.m_assetType))
-            , m_assetData(rhs.m_assetData)
-            , m_flags(rhs.m_flags)
-            , m_assetHint(AZStd::move(rhs.m_assetHint))
         {
-            rhs.m_assetId = AssetId();
-            rhs.m_assetType = AssetType::CreateNull();
-            rhs.m_assetData = nullptr;
-            rhs.m_flags = 0;
-            rhs.m_assetHint = AZStd::string();
+            if (this != &rhs)
+            {
+                *this = AZStd::move(rhs);
+            }
         }
 
         //=========================================================================
         template<class T>
         Asset<T>& Asset<T>::operator=(Asset&& rhs)
         {
-            Release();
+            if (this != &rhs)
+            {
+                Release();
 
-            m_assetId = AZStd::move(rhs.m_assetId);
-            m_assetType = AZStd::move(rhs.m_assetType);
-            m_assetData = rhs.m_assetData;
-            m_flags = rhs.m_flags;
-            m_assetHint = AZStd::move(rhs.m_assetHint);
-            rhs.m_assetId = AssetId();
-            rhs.m_assetType = AssetType::CreateNull();
-            rhs.m_assetData = 0;
-            rhs.m_flags = 0;
-            rhs.m_assetHint = AZStd::string();
+                // there is an edge case here, where the RHS refers to the same valid asset (id) but is missing the asset hint
+                // in that specific case we don't want to wipe away the hint we might have.
+                bool sameAsset = m_assetId.IsValid() && (rhs.m_assetId == m_assetId);
+                bool preserveAssetHint = (sameAsset && rhs.m_assetHint.empty());
+
+                m_assetId = AZStd::move(rhs.m_assetId);
+                m_assetType = AZStd::move(rhs.m_assetType);
+                m_assetData = rhs.m_assetData;
+            m_loadBehavior = rhs.m_loadBehavior;
+
+
+                if (!preserveAssetHint)
+                {
+                    // if we're not preserving the asset hint, go ahead and move from the rhs.
+                    m_assetHint = AZStd::move(rhs.m_assetHint);
+                }
+
+                rhs.m_assetId = AssetId();
+                rhs.m_assetType = AssetType::CreateNull();
+                rhs.m_assetData = 0;
+                rhs.m_loadBehavior = AssetLoadBehavior::Default;
+                rhs.m_assetHint = AZStd::string();
+            }
             return *this;
         }
 #endif
@@ -694,6 +754,12 @@ namespace AZ
             return m_assetHint;
         }
 
+        template <class T>
+        void Asset<T>::SetHint(const AZStd::string& newHint)
+        {
+            m_assetHint = newHint;
+        }
+
         //=========================================================================
         template<class T>
         T* Asset<T>::Get() const
@@ -716,9 +782,24 @@ namespace AZ
 
         //=========================================================================
         template<class T>
+        void Asset<T>::SetAutoLoadBehavior(AssetLoadBehavior loadBehavior)
+        {
+            m_loadBehavior = loadBehavior;
+        }
+
+        //=========================================================================
+        template<class T>
+        AssetLoadBehavior Asset<T>::GetAutoLoadBehavior() const
+        {
+            return m_loadBehavior;
+        }
+
+        //=========================================================================
+        template<class T>
         u8 Asset<T>::GetFlags() const
         {
-            return m_flags;
+            AZ_Warning("Asset", false, "Deprecated - replaced by GetAutoLoadBehavior")
+            return static_cast<u8>(m_loadBehavior);
         }
 
         //=========================================================================
@@ -739,9 +820,11 @@ namespace AZ
         template<class T>
         bool Asset<T>::SetFlags(u8 flags)
         {
+            AZ_Warning("Asset", false, "Deprecated - replaced by SetAutoLoadBehavior")
             if (!m_assetData)
             {
-                m_flags = flags;
+                AZ_Assert(flags < static_cast<u8>(AssetLoadBehavior::Count), "Flags value is out of range");
+                m_loadBehavior = static_cast<AssetLoadBehavior>(flags);
                 return true;
             }
             return false;
@@ -751,39 +834,35 @@ namespace AZ
         template<class T>
         void Asset<T>::SetData(AssetData* assetData)
         {
+            // Validate the data type matches or derives from T, or bail
+            if (assetData && !assetData->RTTI_IsTypeOf(AzTypeInfo<T>::Uuid()))
+            {
+#ifdef AZ_ENABLE_TRACING
+                char assetDataIdGUIDStr[Uuid::MaxStringBuffer];
+                char assetTypeIdGUIDStr[Uuid::MaxStringBuffer];
+                assetData->GetId().m_guid.ToString(assetDataIdGUIDStr, AZ_ARRAY_SIZE(assetDataIdGUIDStr));
+                AzTypeInfo<T>::Uuid().ToString(assetTypeIdGUIDStr, AZ_ARRAY_SIZE(assetTypeIdGUIDStr));
+                AZ_Error("AssetDatabase", false, "Asset of type %s:%x (%s) is not related to %s (%s)!",
+                    assetData->GetType().ToString<AZStd::string>().c_str(), assetData->GetId().m_subId, assetDataIdGUIDStr,
+                    AzTypeInfo<T>::Name(), assetTypeIdGUIDStr);
+#endif // AZ_ENABLE_TRACING
+                m_assetId = AssetId();
+                m_assetType = azrtti_typeid<T>();
+                m_assetHint.clear();
+                return;
+            }
+
+            // Acquire new data first, then release old data
+            if (assetData)
+            {
+                assetData->Acquire();
+                m_assetId = assetData->GetId();
+                m_assetType = assetData->RTTI_GetType();
+                UpgradeAssetInfo();
+            }
             if (m_assetData)
             {
                 m_assetData->Release();
-                m_assetData = nullptr;
-            }
-
-            if (assetData)
-            {
-                // Validate the data type matches or derives from T before assigning.
-                if (assetData->RTTI_IsTypeOf(AzTypeInfo<T>::Uuid()))
-                {
-                    m_assetId = assetData->GetId();
-                    m_assetType = assetData->RTTI_GetType();
-                    assetData->Acquire();
-
-                    UpgradeAssetInfo();
-                }
-                else
-                {
-#ifdef AZ_ENABLE_TRACING
-                    char assetDataIdGUIDStr[Uuid::MaxStringBuffer];
-                    char assetTypeIdGUIDStr[Uuid::MaxStringBuffer];
-                    assetData->GetId().m_guid.ToString(assetDataIdGUIDStr, AZ_ARRAY_SIZE(assetDataIdGUIDStr));
-                    AzTypeInfo<T>::Uuid().ToString(assetTypeIdGUIDStr, AZ_ARRAY_SIZE(assetTypeIdGUIDStr));
-                    AZ_Error("AssetDatabase", false, "Asset of type %s:%x (%s) is not related to %s (%s)!",
-                        assetData->GetType().ToString<AZStd::string>().c_str(), assetData->GetId().m_subId, assetDataIdGUIDStr,
-                        AzTypeInfo<T>::Name(), assetTypeIdGUIDStr);
-#endif // AZ_ENABLE_TRACING
-                    m_assetId = AssetId();
-                    m_assetType = azrtti_typeid<T>();
-                    m_assetHint.clear();
-                    return;
-                }
             }
             m_assetData = assetData;
         }
@@ -792,23 +871,44 @@ namespace AZ
         template<class T>
         void Asset<T>::swap(Asset& rhs)
         {
+            bool sameAsset = m_assetId.IsValid() && (rhs.m_assetId == m_assetId);
+
             AZStd::swap(m_assetId, rhs.m_assetId);
             AZStd::swap(m_assetType, rhs.m_assetType);
             AZStd::swap(m_assetData, rhs.m_assetData);
-            AZStd::swap(m_flags, rhs.m_flags);
-            AZStd::swap(m_assetHint, rhs.m_assetHint);
+            AZStd::swap(m_loadBehavior, rhs.m_loadBehavior);
+
+            // the asset hint is useful forensically - its more of a cached value than
+            // part of the data that we are swapping
+            // if we are referring to the exact same actual asset, we'd prefer to preserve the asset hint
+            // on both sides of the swap.  We want as many Asset<T> hint fields to be filled in with useful
+            // forensic data.
+            if ((sameAsset) && (rhs.m_assetHint.empty()))
+            {
+                rhs.m_assetHint = m_assetHint;
+            }
+            else if ((sameAsset) && (m_assetHint.empty()))
+            {
+                m_assetHint = rhs.m_assetHint;
+            }
+            else
+            {
+                // if we are a different asset (or being swapped with a empty) then we just swap as usual.
+                AZStd::swap(m_assetHint, rhs.m_assetHint);
+            }
+            
         }
 
         //=========================================================================
         template<class T>
         bool Asset<T>::QueueLoad(const AZ::Data::AssetFilterCB& assetLoadFilterCB)
         {
-            const u8 flags = GetFlags();
+            const AssetLoadBehavior loadBehavior = GetAutoLoadBehavior();
 
             if (!m_assetData && m_assetId.IsValid())
             {
                 *this = AssetInternal::GetAsset(m_assetId, m_assetType, false);
-                SetFlags(flags);
+                SetAutoLoadBehavior(loadBehavior);
             }
 
             if (m_assetData && m_assetData->GetId().IsValid())
@@ -823,9 +923,8 @@ namespace AZ
 
             if (m_assetData)
             {
-                const AZ::u8 loadFlags = GetFlags();
                 *this = AssetInternal::QueueAssetLoad(m_assetData, assetLoadFilterCB);
-                SetFlags(loadFlags);
+                SetAutoLoadBehavior(loadBehavior);
             }
 
             return (m_assetData != nullptr);
@@ -850,12 +949,12 @@ namespace AZ
         {
             if (id != GetId())
             {
-                const AZ::u8 loadFlags = GetFlags();
+                const AssetLoadBehavior loadBehavior = GetAutoLoadBehavior();
 
                 // Acquire new asset. This will release the current asset.
                 *this = AssetInternal::GetAsset(id, m_assetType, queueLoad, true);
 
-                SetFlags(loadFlags);
+                SetAutoLoadBehavior(loadBehavior);
             }
 
             return true; // already created
@@ -884,7 +983,15 @@ namespace AZ
 
             return false;
         }
+        //=========================================================================
+        // Built-in asset helper filters.
+        //=========================================================================
+
+        /// Indiscriminately skips all asset references.
+        bool AssetFilterNoAssetLoading(const Asset<Data::AssetData>& /*asset*/);
+
     }  // namespace Data
+
 }   // namespace AZ
 
 namespace AZStd
@@ -897,7 +1004,8 @@ namespace AZStd
         typedef size_t      result_type;
         AZ_FORCE_INLINE size_t operator()(const AZ::Data::AssetId& id) const
         {
-            return id.m_guid.GetHash();
+            // use the subId here becuase otherwise you suffer performance problems if one source has a lot of products (same guid, varying subid)
+            return id.m_guid.GetHash() ^ static_cast<size_t>(id.m_subId);
         }
     };
 }

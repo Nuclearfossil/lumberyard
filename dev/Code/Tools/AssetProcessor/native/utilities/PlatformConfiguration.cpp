@@ -11,7 +11,7 @@
 */
 #include "native/utilities/PlatformConfiguration.h"
 #include "native/utilities/assetUtils.h"
-#include "native/assetManager/assetScanFolderInfo.h"
+#include "native/AssetManager/assetScanFolderInfo.h"
 #include "native/assetprocessor.h"
 #include "native/utilities/assetUtils.h"
 #include <AzCore/Debug/Trace.h>
@@ -31,6 +31,8 @@
 #include <QStringList>
 #include <QDir>
 
+#include <AzToolsFramework/API/EditorAssetSystemAPI.h>
+
 namespace
 {
     // the starting order in the file for gems.
@@ -43,6 +45,58 @@ namespace
 
     // Path to the user preferences file
     const char* s_preferencesFileName = "SetupAssistantUserPreferences.ini";
+
+    // A utility function which checks the given path starting at the root and updates the relative path to be the actual
+    // correct physical path to a file located there.
+    // for example, if you pass it "c:\lumberyard\dev" as the root and "editor\icons\whatever.ico" as the relative path
+    // it may update relativePathFromRoot to be "Editor\Icons\Whatever.ico" if such a casing is the actual physical case on disk already.
+    // if such a file does NOT exist, it returns FALSE.
+    // if the file DOES exist, it will correct the entire path, and return TRUE.
+    bool UpdateToCorrectCase(const QString& rootPath, QString& relativePathFromRoot)
+    {
+        // on windows, the file system is case insensitive and we can do a quick early check for the existence up front and return fast:
+        // on other platforms (that are case sensitive) we have no choice but to see if we can hunt down the "real" path of the file
+        // even if given multiple "wrong cases"
+#if defined(AZ_PLATFORM_WINDOWS)
+        if (!QFileInfo::exists(rootPath + "/" + relativePathFromRoot))
+        {
+            return false;
+        }
+#endif
+
+        // we have to start at the first directory and work our way up.
+        // the assumption is that rootPath is correct case already
+        // and that relativepathfromroot is normalized (forward slashes only)
+        QStringList tokenized = relativePathFromRoot.split(QChar('/'), QString::SkipEmptyParts);
+        QString validatedPath(rootPath);
+
+        bool success = true;
+
+        for (QString& element : tokenized)
+        {
+            // validate the element:
+            QStringList searchPattern;
+            searchPattern << element;
+
+            QDir checkDir(validatedPath);
+            
+            // note that this specifically does not emit the case sensitive option - so it will find it caselessly.
+            QStringList actualCasing = checkDir.entryList(searchPattern, QDir::Files|QDir::Dirs);
+            if (actualCasing.isEmpty())
+            {
+                // no such file!
+                success = false;
+                break;
+            }
+            // we found it!
+            element = actualCasing[0];
+            validatedPath = checkDir.absoluteFilePath(element); // go one step deeper.
+        }
+
+        relativePathFromRoot = tokenized.join(QChar('/'));
+
+        return success;
+    }
 }
 
 namespace AssetProcessor
@@ -187,9 +241,9 @@ namespace AssetProcessor
         // command line isn't active, read from config files instead.
         // note that the current host platform is enabled by default.
 
-        if (!m_tempEnabledPlatforms.contains(CURRENT_PLATFORM))
+        if (!m_tempEnabledPlatforms.contains(AzToolsFramework::AssetSystem::GetHostAssetPlatform()))
         {
-            m_tempEnabledPlatforms.push_back(CURRENT_PLATFORM);
+            m_tempEnabledPlatforms.push_back(AzToolsFramework::AssetSystem::GetHostAssetPlatform());
         }
 
         ReadEnabledPlatformsFromConfigFile(fileSource);
@@ -457,9 +511,22 @@ namespace AssetProcessor
                     bool isRoot = (watchFolder.compare(normalizedRoot, Qt::CaseInsensitive) == 0);
                     recurse &= !isRoot; // root never recurses
 
+                    // New assets can be saved in any scan folder defined except for the engine root.
+                    const bool canSaveNewAssets = !isRoot;
+
                     if (!watchFolder.isEmpty())
                     {
-                        AddScanFolder(ScanFolderInfo(watchFolder, scanFolderDisplayName, scanFolderPortableKey, outputPrefix, isRoot, recurse, platforms, order));
+                        AddScanFolder(ScanFolderInfo(
+                            watchFolder,
+                            scanFolderDisplayName,
+                            scanFolderPortableKey,
+                            outputPrefix,
+                            isRoot,
+                            recurse,
+                            platforms,
+                            order,
+                            /*scanFolderId*/ 0,
+                            canSaveNewAssets));
                     }
 
                     loader.endGroup();
@@ -727,8 +794,9 @@ namespace AssetProcessor
 
             if (scanFolderName.compare(scanFolderInfo.ScanPath(), Qt::CaseInsensitive) == 0)
             {
-                // we have found the root of the existing file.
-                // nothing can override it.
+                // we have found the actual folder containing the file we started with
+                // since all other folders "deeper" in the override vector are lower priority than this one
+                // (they are sorted in priority order, most priority first).
                 return QString();
             }
             QString tempRelativeName(relativeName);
@@ -743,14 +811,11 @@ namespace AssetProcessor
                 // the name is a deeper relative path, but we don't recurse this scan folder, so it can't win
                 continue;
             }
-
-            QString checkForReplacement = QDir(scanFolderInfo.ScanPath()).absoluteFilePath(tempRelativeName);
-
-
-            if (QFile::exists(checkForReplacement))
+            
+            if (UpdateToCorrectCase(scanFolderInfo.ScanPath(), tempRelativeName))
             {
                 // we have found a file in an earlier scan folder that would override this file
-                return AssetUtilities::NormalizeFilePath(checkForReplacement);
+                return AssetUtilities::NormalizeFilePath(QDir(scanFolderInfo.ScanPath()).absoluteFilePath(tempRelativeName));
             }
         }
 
@@ -782,24 +847,10 @@ namespace AssetProcessor
                 continue;
             }
             QDir rooted(scanFolderInfo.ScanPath());
-            QString fullPath = rooted.absoluteFilePath(tempRelativeName);
-            if (QFile::exists(fullPath))
+            if (UpdateToCorrectCase(rooted.absolutePath(), tempRelativeName))
             {
-                // the problem here is that on case insensitive file systems, the file "BLAH.TXT" will also respond as existing if we ask for "blah.txt"
-                // but we want to return the actual real casing of the file itself.
-                // to do this, we use the directory information for the directory the file is in
-                // we know that this always succeeds since we just verified that the file exists.
-                QFileInfo newInfo(fullPath);
-                QStringList searchPattern;
-                searchPattern << newInfo.fileName();
-                QStringList actualCasing = newInfo.absoluteDir().entryList(searchPattern, QDir::Files);
-
-                if (actualCasing.isEmpty())
-                {
-                    return tempRelativeName;
-                }
-
-                return AssetUtilities::NormalizeFilePath(newInfo.absoluteDir().absoluteFilePath(actualCasing[0]));
+                QString fullPath = rooted.absoluteFilePath(tempRelativeName);
+                return AssetUtilities::NormalizeFilePath(fullPath);
             }
         }
         return QString();
@@ -808,40 +859,59 @@ namespace AssetProcessor
     const AssetProcessor::ScanFolderInfo* PlatformConfiguration::GetScanFolderForFile(const QString& fullFileName) const
     {
         QString normalized = AssetUtilities::NormalizeFilePath(fullFileName);
+
+        // first, check for an EXACT match.  If there's an exact match, this must be the one returned!
+        // this is to catch the case where the actual path of a scan folder is fed in to this.
         for (int pathIdx = 0; pathIdx < m_scanFolders.size(); ++pathIdx)
         {
             QString scanFolderName = m_scanFolders[pathIdx].ScanPath();
-            if (normalized.startsWith(scanFolderName, Qt::CaseInsensitive))
+            if (normalized.compare(scanFolderName, Qt::CaseInsensitive) == 0)
             {
-                if (normalized.compare(scanFolderName, Qt::CaseInsensitive) == 0)
+                // if its an exact match, we're basically done
+                return &m_scanFolders[pathIdx];
+            }
+        }
+
+        for (int pathIdx = 0; pathIdx < m_scanFolders.size(); ++pathIdx)
+        {
+            QString scanFolderName = m_scanFolders[pathIdx].ScanPath();
+            if (normalized.length() > scanFolderName.length())
+            {
+                if (normalized.startsWith(scanFolderName, Qt::CaseInsensitive))
                 {
-                    // if its an exact match, we're basically done
-                    return &m_scanFolders[pathIdx];
-                }
-                else
-                {
-                    if (normalized.length() > scanFolderName.length())
+                    QChar examineChar = normalized[scanFolderName.length()]; // it must be a slash or its just a scan folder that starts with the same thing by coincidence.
+                    if (examineChar != QChar('/'))
                     {
-                        QChar examineChar = normalized[scanFolderName.length()]; // it must be a slash or its just a scan folder that starts with the same thing by coincidence.
-                        if (examineChar != QChar('/'))
+                        continue;
+                    }
+                    QString relPath = normalized.right(normalized.length() - scanFolderName.length() - 1); // also eat the slash, hence -1
+                    if (!m_scanFolders[pathIdx].RecurseSubFolders())
+                    {
+                        // we only allow things that are in the root for nonrecursive folders
+                        if (relPath.contains('/'))
                         {
                             continue;
                         }
-                        QString relPath = normalized.right(normalized.length() - scanFolderName.length() - 1); // also eat the slash, hence -1
-                        if (!m_scanFolders[pathIdx].RecurseSubFolders())
-                        {
-                            // we only allow things that are in the root for nonrecursive folders
-                            if (relPath.contains('/'))
-                            {
-                                continue;
-                            }
-                        }
-                        return &m_scanFolders[pathIdx];
                     }
+                    return &m_scanFolders[pathIdx];
                 }
             }
         }
         return nullptr; // not found.
+    }
+
+    //! Given a scan folder path, get its complete info
+    const AssetProcessor::ScanFolderInfo* PlatformConfiguration::GetScanFolderByPath(const QString& scanFolderPath) const
+    {
+        QString normalized = AssetUtilities::NormalizeFilePath(scanFolderPath);
+        for (int pathIdx = 0; pathIdx < m_scanFolders.size(); ++pathIdx)
+        {
+            if (QString::compare(m_scanFolders[pathIdx].ScanPath(), normalized, Qt::CaseSensitive) == 0)
+            {
+                return &m_scanFolders[pathIdx];
+            }
+        }
+        return nullptr;
     }
 
     int PlatformConfiguration::GetMinJobs() const
@@ -1041,9 +1111,11 @@ namespace AssetProcessor
         QString gameProjectRootAbsPath = gameProjectRoot.absolutePath();
         QString engineRootAbsPath = engineRoot.absolutePath();
 
+        AZStd::string gemDirectoryFolderName = GemInformation::GemDirectoryFolderName();
+
         if (!gameProjectRootAbsPath.isEmpty())
         {
-            registry->AddSearchPath({ gameProjectRootAbsPath.toUtf8().constData(), "Gems" }, false);
+            registry->AddSearchPath({ gameProjectRootAbsPath.toUtf8().constData(), gemDirectoryFolderName }, false);
         }
         else
         {
@@ -1052,7 +1124,7 @@ namespace AssetProcessor
 
         if ((!engineRootAbsPath.isEmpty()) && (engineRootAbsPath != gameProjectRootAbsPath))
         {
-            registry->AddSearchPath({ engineRootAbsPath.toUtf8().constData(), "Gems" }, false);
+            registry->AddSearchPath({ engineRootAbsPath.toUtf8().constData(), gemDirectoryFolderName }, false);
         }
 
         projectSettings = registry->CreateProjectSettings();
@@ -1185,12 +1257,12 @@ namespace AssetProcessor
             //      Output Prefix:  "" // empty string - this means put it in @assets@ as per default
             //      Is Root:        False
             //      Recursive:      True
-            QString gemFolder = gemDir.absoluteFilePath("Assets");
+            QString gemFolder = gemDir.absoluteFilePath(GemInformation::GetGemAssetFolder());
 
             // note that we normalize this gem path with slashes so that there's nothing special about it compared to other scan folders
             gemFolder = AssetUtilities::NormalizeDirectoryPath(gemFolder);
 
-            QString assetBrowserDisplayName = QString("Gems/%1/Assets").arg(gemDisplayName);
+            QString assetBrowserDisplayName = GemInformation::GetGemAssetFolder(); // Gems always use assets folder as their displayname...
             QString portableKey = QString("gemassets-%1").arg(gemGuid);
             QString outputPrefix; // empty intentionally here
             bool isRoot = false;
@@ -1198,7 +1270,17 @@ namespace AssetProcessor
             int order = gemElement.m_isGameGem ? gemGameOrder++ : gemOrder++;
 
             AZ_TracePrintf(AssetProcessor::DebugChannel, "Adding GEM assets folder for monitoring / scanning: %s.\n", gemFolder.toUtf8().data());
-            AddScanFolder(ScanFolderInfo(gemFolder, assetBrowserDisplayName, portableKey, outputPrefix, isRoot, isRecursive, platforms, order));
+            AddScanFolder(ScanFolderInfo(
+                gemFolder,
+                assetBrowserDisplayName,
+                portableKey,
+                outputPrefix,
+                isRoot,
+                isRecursive,
+                platforms,
+                order,
+                /*scanFolderId*/ 0,
+                /*canSaveNewAssets*/ true)); // Users can create assets like slices in Gem asset folders.
 
             // add the gem folder itself for the root metadata (non-recursive)
             // note that these root folders only exist to make sure "gem.json" is in the cache at the path @root@/Gems/GemName/Gem.json

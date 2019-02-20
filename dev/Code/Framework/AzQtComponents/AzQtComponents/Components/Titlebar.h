@@ -61,7 +61,8 @@ namespace AzQtComponents
         void handleClose();
         void handleMaximize();
         void handleMinimize();
-        bool hasButton(DockBarButton::WindowDecorationButton) const;
+        bool hasButton(DockBarButton::WindowDecorationButton buttonType) const;
+        bool buttonIsEnabled(DockBarButton::WindowDecorationButton buttonType) const;
         void handleMoveRequest();
         void handleSizeRequest();
 
@@ -73,6 +74,11 @@ namespace AzQtComponents
          * the margin ourselves.
          */
         bool isTopResizeArea(const QPoint& globalPos) const;
+        /**
+          * These will only return true ever for macOS.
+          */
+        bool isLeftResizeArea(const QPoint& globalPos) const;
+        bool isRightResizeArea(const QPoint& globalPos) const;
 
         /**
          * The title rect width minus the buttons rect.
@@ -84,6 +90,9 @@ namespace AzQtComponents
         * Expose the title using a QT property so that test automation can read it
         */
         Q_PROPERTY(QString title READ title)
+
+        void disableButton(DockBarButton::WindowDecorationButton buttonType);
+        void enableButton(DockBarButton::WindowDecorationButton buttonType);
 
     Q_SIGNALS:
         void undockAction();
@@ -116,10 +125,11 @@ namespace AzQtComponents
         bool isDragging() const;
         bool isLeftButtonDown() const;
         bool canDragWindow() const;
-        bool isResizingTop() const;
+        bool isResizingWindow() const;
         bool isDraggingWindow() const;
-        void resizeTop(const QPoint& globalPos);
+        void resizeWindow(const QPoint& globalPos);
         void dragWindow(const QPoint& globalPos);
+        DockBarButton* findButton(DockBarButton::WindowDecorationButton buttonType) const;
 
         DockBar* m_dockBar;
         QWidget* m_firstButton = nullptr;
@@ -134,6 +144,8 @@ namespace AzQtComponents
         bool m_autoButtons = false;
         bool m_pendingRepositioning = false;
         bool m_resizingTop = false;
+        bool m_resizingRight = false;
+        bool m_resizingLeft = false;
         qreal m_relativeDragPos = 0.0;
         qreal m_lastLocalPosX = 0.0;
         QMenu* m_contextMenu = nullptr;
@@ -149,7 +161,7 @@ namespace AzQtComponents
 
         QWindow* topLevelWindow() const;
         void updateMouseCursor(const QPoint& globalPos);
-        bool canResizeTop() const;
+        bool canResize() const;
 
         Qt::CursorShape m_originalCursor = Qt::ArrowCursor;
         QTimer m_enableMouseTrackingTimer;

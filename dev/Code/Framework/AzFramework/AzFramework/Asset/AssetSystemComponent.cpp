@@ -37,16 +37,18 @@ namespace AzFramework
         void OnAssetSystemMessage(unsigned int /*typeId*/, const void* buffer, unsigned int bufferSize)
         {
             AssetNotificationMessage message;
-            if (!AZ::Utils::LoadObjectFromBufferInPlace(buffer, bufferSize, message))
+            // note that we forbid asset loading and we set STRICT mode.  These messages are all the kind of message that is supposed to be transmitted between the
+            // same version of software, and are created at runtime, not loaded from disk, so they should not contain errors - if they do, it requires investigation.
+            if (!AZ::Utils::LoadObjectFromBufferInPlace(buffer, bufferSize, message, nullptr, AZ::ObjectStream::FilterDescriptor(&AZ::Data::AssetFilterNoAssetLoading, AZ::ObjectStream::FILTERFLAG_STRICT)))
             {
-                AZ_TracePrintf("AssetSystem", "Problem deserializing AssetNotificationMessage");
+                AZ_WarningOnce("AssetSystem", false, "AssetNotificationMessage received but unable to deserialize it.  Is AssetProcessor.exe up to date?");
                 return;
             }
 
             if (message.m_data.length() > AZ_MAX_PATH_LEN)
             {
                 auto maxPath = message.m_data.substr(0, AZ_MAX_PATH_LEN - 1);
-                AZ_TracePrintf("AssetSystem", "HotUpdate: filename too long(%zd) : %s...", bufferSize, maxPath.c_str());
+                AZ_Warning("AssetSystem", false, "HotUpdate: filename too long(%zd) : %s...", bufferSize, maxPath.c_str());
                 return;
             }
 
@@ -74,7 +76,7 @@ namespace AzFramework
             }
             break;
             default:
-                AZ_TracePrintf("AssetSystem", "Unknown AssetNotificationMessage type");
+                AZ_WarningOnce("AssetSystem", false, "Unknown AssetNotificationMessage type received from network.  Is AssetProcessor.exe up to date?");
                 break;
             }
         }
@@ -123,18 +125,24 @@ namespace AzFramework
                 apConnection->Configure(m_branchToken.c_str(), m_platform.c_str(), "");
             }
 
+            AzFramework::AssetSystemBus::AllowFunctionQueuing(true);
             AssetSystemRequestBus::Handler::BusConnect();
+            AZ::SystemTickBus::Handler::BusConnect();
         }
 
         void AssetSystemComponent::Deactivate()
         {
+            AZ::SystemTickBus::Handler::BusDisconnect();
             AssetSystemRequestBus::Handler::BusDisconnect();
-            m_socketConn->RemoveMessageHandler(AZ_CRC("AssetProcessorManager::AssetNotification", 0xd6191df5), m_cbHandle);
-            m_socketConn->Disconnect();
             
-            AzFramework::AssetSystemBus::ClearQueuedEvents();
-
+            m_socketConn->RemoveMessageHandler(AZ_CRC("AssetProcessorManager::AssetNotification", 0xd6191df5), m_cbHandle);
+            m_socketConn->Disconnect(true);
+            
             DisableSocketConnection();
+
+            // clear the queue out early
+            AzFramework::AssetSystemBus::AllowFunctionQueuing(false);
+            AzFramework::AssetSystemBus::ClearQueuedEvents();
         }
 
         void AssetSystemComponent::Reflect(AZ::ReflectContext* context)
@@ -205,7 +213,7 @@ namespace AzFramework
             if (serialize)
             {
                 serialize->Class<AssetSystemComponent, AZ::Component>()
-                    ->SerializerForEmptyClass();
+                    ;
             }
         }
 
@@ -303,11 +311,16 @@ namespace AzFramework
                 return false;
             }
 
+            bool result = true;
+
             if (apConnection->IsConnected())
             {
-                return apConnection->Disconnect();
+                result = apConnection->Disconnect(true);
             }
-            return true;
+
+            AzFramework::AssetSystemBus::ClearQueuedEvents();
+
+            return result;
         }
 
         bool AssetSystemComponent::SaveCatalog()
@@ -338,7 +351,7 @@ namespace AzFramework
             return SendAssetStatusRequest(assetPath, true);
         }
 
-        void AssetSystemComponent::UpdateQueuedEvents()
+        void AssetSystemComponent::OnSystemTick()
         {
             AZ_TRACE_METHOD();
             AssetSystemBus::ExecuteQueuedEvents();

@@ -218,6 +218,7 @@ namespace AzToolsFramework
             static void GetIncompatibleServices(AZ::ComponentDescriptor::DependencyArrayType& incompatible);
             static void Reflect(AZ::ReflectContext* context);
 
+            bool ValidatePotentialParent(void* newValue, const AZ::Uuid& valueType);
             AZ::u32 ParentChanged();
             AZ::u32 TransformChanged();
             AZ::u32 StaticChanged();
@@ -262,6 +263,9 @@ namespace AzToolsFramework
             AZStd::vector<AZ::EntityId> m_childrenEntityIds;
 
             bool m_suppressTransformChangedEvent;
+
+            bool m_localTransformDirty = true;
+            bool m_worldTransformDirty = true;
 
             // Used to serialize data required for NetBindable
             bool m_netSyncEnabled;

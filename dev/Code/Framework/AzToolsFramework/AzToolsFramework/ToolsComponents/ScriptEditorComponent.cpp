@@ -355,19 +355,19 @@ namespace AzToolsFramework
                             AZ::ScriptDataContext valueTable;
                             if (enumValuesTable.InspectTable(enumIndex, valueTable))
                             {
-                                const char* fieldName;
-                                int fieldIndex;
+                                const char* tableFieldName;
+                                int tableFieldIndex;
                                 int enumValueIndex;
-                                while (valueTable.InspectNextElement(enumValueIndex, fieldName, fieldIndex))
+                                while (valueTable.InspectNextElement(enumValueIndex, tableFieldName, tableFieldIndex))
                                 {
-                                    if (valueTable.IsNumber(enumValueIndex) && fieldIndex == 1)
+                                    if (valueTable.IsNumber(enumValueIndex) && tableFieldIndex == 1)
                                     {
                                         double value;
                                         valueTable.ReadValue(enumValueIndex, value);
                                         enumValue.first = value;
                                         isValidValue = true;
                                     }
-                                    else if (valueTable.IsString(enumValueIndex) && fieldIndex == 2)
+                                    else if (valueTable.IsString(enumValueIndex) && tableFieldIndex == 2)
                                     {
                                         const char* value = nullptr;
                                         valueTable.ReadValue(enumValueIndex, value);
@@ -424,19 +424,19 @@ namespace AzToolsFramework
                             AZ::ScriptDataContext valueTable;
                             if (enumValuesTable.InspectTable(enumIndex, valueTable))
                             {
-                                const char* fieldName = nullptr;
-                                int fieldIndex;
+                                const char* tableFieldName = nullptr;
+                                int tableFieldIndex;
                                 int enumValueIndex;
-                                while (valueTable.InspectNextElement(enumValueIndex, fieldName, fieldIndex))
+                                while (valueTable.InspectNextElement(enumValueIndex, tableFieldName, tableFieldIndex))
                                 {
-                                    if (valueTable.IsString(enumValueIndex) && fieldIndex == 1)
+                                    if (valueTable.IsString(enumValueIndex) && tableFieldIndex == 1)
                                     {
                                         const char* value = nullptr;
                                         valueTable.ReadValue(enumValueIndex, value);
                                         enumValue.first = value;
                                         isValidValue = true;
                                     }
-                                    else if (valueTable.IsString(enumValueIndex) && fieldIndex == 2)
+                                    else if (valueTable.IsString(enumValueIndex) && tableFieldIndex == 2)
                                     {
                                         const char* value = nullptr;
                                         valueTable.ReadValue(enumValueIndex, value);
@@ -835,12 +835,15 @@ namespace AzToolsFramework
 
         void ScriptEditorComponent::BuildGameEntity(AZ::Entity* gameEntity)
         {
-            gameEntity->AddComponent(&m_scriptComponent);
-        }
+            AZ::SerializeContext* context = nullptr;
+            AZ::ComponentApplicationBus::BroadcastResult(context, &AZ::ComponentApplicationBus::Events::GetSerializeContext);
+            if (!context)
+            {
+                AZ_Error("ScriptEditorComponent", false, "Can't get serialize context from component application.");
+                return;
+            }
 
-        void ScriptEditorComponent::FinishedBuildingGameEntity(AZ::Entity* gameEntity)
-        {
-            gameEntity->RemoveComponent(&m_scriptComponent);
+            gameEntity->AddComponent(context->CloneObject(&m_scriptComponent));
         }
 
         void ScriptEditorComponent::SetPrimaryAsset(const AZ::Data::AssetId& assetId)
@@ -900,8 +903,15 @@ namespace AzToolsFramework
 
         void ScriptEditorComponent::OnAssetError(AZ::Data::Asset<AZ::Data::AssetData> asset)
         {
-            (void)asset;
-            AZ_Error("Lua Script", false, "Failed to load asset for ScriptComponent: id=%s, type %s", asset.GetId().ToString<AZStd::string>().c_str(), asset.GetType().ToString<AZStd::string>().c_str());
+            // only notify for asset errors for the asset we care about.
+#if defined(AZ_ENABLE_TRACING)
+            if ((asset.GetId().IsValid()) && (asset == m_scriptAsset))
+            {
+                AZ_Error("Lua Script", false, "Failed to load asset for ScriptComponent: %s", m_scriptAsset.ToString<AZStd::string>().c_str());
+            }
+#else // else if AZ_ENABLE_TRACING is not currently defined...
+            AZ_UNUSED(asset);
+#endif
         }
 
         void ScriptEditorComponent::SetScript(const AZ::Data::Asset<AZ::ScriptAsset>& script) 

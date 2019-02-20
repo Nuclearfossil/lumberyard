@@ -9,6 +9,18 @@
 * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 *
 */
+
+#if defined(AZ_RESTRICTED_PLATFORM)
+#undef AZ_RESTRICTED_SECTION
+#define GRIDMATE_CPP_SECTION_1 1
+#define GRIDMATE_CPP_SECTION_2 2
+#define GRIDMATE_CPP_SECTION_3 3
+#define GRIDMATE_CPP_SECTION_4 4
+#define GRIDMATE_CPP_SECTION_5 5
+#define GRIDMATE_CPP_SECTION_6 6
+#define GRIDMATE_CPP_SECTION_7 7
+#endif
+
 #ifndef AZ_UNITY_BUILD
 
 #include <AzCore/Memory/AllocationRecords.h>
@@ -24,7 +36,15 @@
 #include <GridMate/Storage/GridStorageService.h>
 
 #ifndef GRIDMATE_FOR_TOOLS
+#if defined(AZ_RESTRICTED_PLATFORM)
+#define AZ_RESTRICTED_SECTION GRIDMATE_CPP_SECTION_1
+#include AZ_RESTRICTED_FILE(GridMate_cpp, AZ_RESTRICTED_PLATFORM)
+#   endif
 
+#if defined(AZ_RESTRICTED_PLATFORM)
+#define AZ_RESTRICTED_SECTION GRIDMATE_CPP_SECTION_2
+#include AZ_RESTRICTED_FILE(GridMate_cpp, AZ_RESTRICTED_PLATFORM)
+#   endif
 #endif
 
 namespace GridMate
@@ -182,12 +202,6 @@ GridMateImpl::GridMateImpl(const GridMateDesc& desc)
 
     m_storageService = nullptr;
     m_isCustomStorageService = false;
-
-    AZ_TracePrintf("GridMate", "\n");
-    AZ_TracePrintf("GridMate", "================================================\n");
-    AZ_TracePrintf("GridMate", "= GridMate initialized: Version %02d.%02d.%04d     =\n", GM_BUILD_VERSION / 100, GM_BUILD_VERSION % 100, GM_BUILD_NUMBER);
-    AZ_TracePrintf("GridMate", "= Build on: %14s %11s         =\n", GM_BUILD_DATE, GM_BUILD_TIME);
-    AZ_TracePrintf("GridMate", "================================================\n\n");
 }
 
 //=========================================================================
@@ -220,12 +234,6 @@ GridMateImpl::~GridMateImpl()
             delete registeredService.m_service;
         }
     }
-
-    AZ_TracePrintf("GridMate", "\n");
-    AZ_TracePrintf("GridMate", "================================================\n");
-    AZ_TracePrintf("GridMate", "= GridMate destroyed: Version %02d.%02d.%04d       =\n", GM_BUILD_VERSION / 100, GM_BUILD_VERSION % 100, GM_BUILD_NUMBER);
-    AZ_TracePrintf("GridMate", "= Build on: %14s %11s         =\n", GM_BUILD_DATE, GM_BUILD_TIME);
-    AZ_TracePrintf("GridMate", "================================================\n\n");
 }
 
 void GridMateImpl::RegisterService(GridMateServiceId id, GridMateService* service, bool delegateOwnership)
@@ -343,13 +351,29 @@ bool GridMateImpl::StartLeaderboardService(ServiceType type)
     case ST_XLIVE: // ACCEPTED_USE
     {
         serviceName = "  XLive"; // ACCEPTED_USE
+#if defined(AZ_RESTRICTED_PLATFORM)
+#define AZ_RESTRICTED_SECTION GRIDMATE_CPP_SECTION_3
+#include AZ_RESTRICTED_FILE(GridMate_cpp, AZ_RESTRICTED_PLATFORM)
+#endif
+#if defined(AZ_RESTRICTED_SECTION_IMPLEMENTED)
+#undef AZ_RESTRICTED_SECTION_IMPLEMENTED
+#else
         AZ_Assert(false, "Xbox Live leaderboard service is available on XBone platform only!"); // ACCEPTED_USE
+#endif
         break;
     }
 
     case ST_PSN: // ACCEPTED_USE
         serviceName = "  PSN"; // ACCEPTED_USE
+#if defined(AZ_RESTRICTED_PLATFORM)
+#define AZ_RESTRICTED_SECTION GRIDMATE_CPP_SECTION_4
+#include AZ_RESTRICTED_FILE(GridMate_cpp, AZ_RESTRICTED_PLATFORM)
+#endif
+#if defined(AZ_RESTRICTED_SECTION_IMPLEMENTED)
+#undef AZ_RESTRICTED_SECTION_IMPLEMENTED
+#else
         AZ_Assert(false, "PSN leaderboard service is available on PS4 platform only!"); // ACCEPTED_USE
+#endif
         break;
 #endif // GRIDMATE_FOR_TOOLS
 
@@ -447,11 +471,27 @@ bool GridMateImpl::StartAchievementService(ServiceType type, const AchievementSe
 
 #ifndef GRIDMATE_FOR_TOOLS
     case ST_XLIVE: // ACCEPTED_USE
+#if defined(AZ_RESTRICTED_PLATFORM)
+#define AZ_RESTRICTED_SECTION GRIDMATE_CPP_SECTION_5
+#include AZ_RESTRICTED_FILE(GridMate_cpp, AZ_RESTRICTED_PLATFORM)
+#endif
+#if defined(AZ_RESTRICTED_SECTION_IMPLEMENTED)
+#undef AZ_RESTRICTED_SECTION_IMPLEMENTED
+#else
         AZ_Assert(false, "Xbox live achievement service is available on XBone platform only!"); // ACCEPTED_USE
+#endif
         break;
 
     case ST_PSN: // ACCEPTED_USE
+#if defined(AZ_RESTRICTED_PLATFORM)
+#define AZ_RESTRICTED_SECTION GRIDMATE_CPP_SECTION_6
+#include AZ_RESTRICTED_FILE(GridMate_cpp, AZ_RESTRICTED_PLATFORM)
+#endif
+#if defined(AZ_RESTRICTED_SECTION_IMPLEMENTED)
+#undef AZ_RESTRICTED_SECTION_IMPLEMENTED
+#else
         AZ_Assert(false, "PSN trophy service is available on PS4 platform only!"); // ACCEPTED_USE
+#endif
         break;
 #endif // GRIDMATE_FOR_TOOLS
 
@@ -546,6 +586,10 @@ bool GridMateImpl::StartStorageService(ServiceType type, const GridStorageServic
         AZ_Assert(false, "Storage service is not available for ST_LAN!");
         break;
 #ifndef GRIDMATE_FOR_TOOLS
+#if defined(AZ_RESTRICTED_PLATFORM)
+#define AZ_RESTRICTED_SECTION GRIDMATE_CPP_SECTION_7
+#include AZ_RESTRICTED_FILE(GridMate_cpp, AZ_RESTRICTED_PLATFORM)
+#endif
 #endif // GRIDMATE_FOR_TOOLS
     default:
         AZ_Assert(false, "ServiceType 0x%x is not supported!", static_cast<int>(type));

@@ -14,6 +14,7 @@
 
 #include "EMotionFXConfig.h"
 #include <AzCore/std/containers/vector.h>
+#include <AzCore/std/string/string.h>
 #include "BaseObject.h"
 #include "VertexAttributeLayer.h"
 
@@ -54,7 +55,7 @@ namespace EMotionFX
     class EMFX_API Mesh
         : public BaseObject
     {
-        MCORE_MEMORYOBJECTCATEGORY(Mesh, EMFX_DEFAULT_ALIGNMENT, EMFX_MEMCATEGORY_GEOMETRY_MESHES);
+        AZ_CLASS_ALLOCATOR_DECL
 
     public:
         /**
@@ -109,19 +110,22 @@ namespace EMotionFX
         /**
          * Calculates the tangent vectors which can be used for per pixel lighting.
          * These are vectors also known as S and T, used in per pixel lighting techniques, like bumpmapping.
-         * You can calculate the binormal for the given tangent by taking the cross product between the
-         * normal and the tangent for the given vertex. These three vectors (normal, tangent and binormal) are
+         * You can calculate the bitangent for the given tangent by taking the cross product between the
+         * normal and the tangent for the given vertex. These three vectors (normal, tangent and bitangent) are
          * used to build a matrix which transforms the lights into tangent space.
          * You can only call this method after you have passed all other vertex and index data to the mesh.
          * So after all that has been initialized, call this method to calculate these vectors automatically.
+         * If you specify a UV set that doesn't exist, this method will fall back to UV set 0.
          * @param uvLayer[in] The UV texture coordinate layer number. This is not the vertex attribute layer number, but the UV layer number.
          *                    This means that 0 means the first UV set, and 1 would mean the second UV set, etc.
          *                    When the UV layer doesn't exist, this method does nothing.
+         * @param storeBitangents Set to true when you want the mesh to store its bitangents in its own layer. This will generate a bitangents layer inside the mesh. False will no do this.
+         * @result Returns true on success, or false on failure. A failure can happen when no UV data can be found.
          */
-        void CalcTangents(uint32 uvLayer = 0);
+        bool CalcTangents(uint32 uvLayer = 0, bool storeBitangents = false);
 
         /**
-         * Calculates the tangent and binormal for a given triangle.
+         * Calculates the tangent and bitangent for a given triangle.
          * @param posA The position of the first vertex.
          * @param posB The position of the second vertex.
          * @param posC The position of the third vertex.
@@ -129,11 +133,11 @@ namespace EMotionFX
          * @param uvB The texture coordinate of the second vertex.
          * @param uvC The texture coordinate of the third vertex.
          * @param outTangent A pointer to the vector to store the calculated tangent vector.
-         * @param outBiNormal A pointer to the vector to store the calculated binormal vector (calculated using the gradients).
+         * @param outBitangent A pointer to the vector to store the calculated bitangent vector (calculated using the gradients).
          */
-        static void CalcTangentAndBiNormalForFace(const AZ::Vector3& posA, const AZ::Vector3& posB, const AZ::Vector3& posC,
+        static void CalcTangentAndBitangentForFace(const AZ::Vector3& posA, const AZ::Vector3& posB, const AZ::Vector3& posC,
             const AZ::Vector2& uvA,  const AZ::Vector2& uvB,  const AZ::Vector2& uvC,
-            AZ::Vector3* outTangent, AZ::Vector3* outBiNormal);
+            AZ::Vector3* outTangent, AZ::Vector3* outBitangent);
 
         /**
          * Allocate mesh data. If there is already data allocated, this data will be deleted first.
@@ -384,11 +388,11 @@ namespace EMotionFX
         VertexAttributeLayer* FindVertexAttributeLayer(uint32 layerTypeID, uint32 occurence = 0) const;
 
         uint32 FindVertexAttributeLayerIndexByName(const char* name) const;
-        uint32 FindVertexAttributeLayerIndexByNameString(const MCore::String& name) const;
+        uint32 FindVertexAttributeLayerIndexByNameString(const AZStd::string& name) const;
         uint32 FindVertexAttributeLayerIndexByNameID(uint32 nameID) const;
 
         uint32 FindSharedVertexAttributeLayerIndexByName(const char* name) const;
-        uint32 FindSharedVertexAttributeLayerIndexByNameString(const MCore::String& name) const;
+        uint32 FindSharedVertexAttributeLayerIndexByNameString(const AZStd::string& name) const;
         uint32 FindSharedVertexAttributeLayerIndexByNameID(uint32 nameID) const;
 
         /**
@@ -471,7 +475,7 @@ namespace EMotionFX
          * For a cube, which normally might have 32 vertices, it will result in 8 positions.
          * @param outPoints The output array to store the points in. The array will be automatically resized.
          */
-        void ExtractOriginalVertexPositions(MCore::Array<AZ::Vector3>& outPoints) const;
+        void ExtractOriginalVertexPositions(AZStd::vector<AZ::Vector3>& outPoints) const;
 
         /**
          * Clone the mesh.

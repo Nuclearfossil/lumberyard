@@ -21,13 +21,16 @@
 #include "Node.h"
 #include "TransformData.h"
 #include "MotionEventTable.h"
-
+#include <EMotionFX/Source/Allocators.h>
 #include <MCore/Source/IDGenerator.h>
 #include <MCore/Source/Compare.h>
 
 
 namespace EMotionFX
 {
+    AZ_CLASS_ALLOCATOR_IMPL(MotionInstance, MotionAllocator, 0)
+
+
     // constructor
     MotionInstance::MotionInstance(Motion* motion, ActorInstance* actorInstance, uint32 startNodeIndex)
         : BaseObject()
@@ -121,7 +124,7 @@ namespace EMotionFX
     // create
     MotionInstance* MotionInstance::Create(Motion* motion, ActorInstance* actorInstance, uint32 startNodeIndex)
     {
-        return new MotionInstance(motion, actorInstance, startNodeIndex);
+        return aznew MotionInstance(motion, actorInstance, startNodeIndex);
     }
 
 
@@ -325,7 +328,7 @@ namespace EMotionFX
             // check and handle the bounds of the current playtime, to make it loop etc
             if (mMaxLoops == EMFX_LOOPFOREVER) // if it's looping forever
             {
-                if (currentTime > maxTime)
+                if (currentTime >= maxTime)
                 {
                     *outNumLoops = *outNumLoops + 1;
                     hasLooped = true;
@@ -351,7 +354,7 @@ namespace EMotionFX
             else
             {
                 // if we passed the end of the motion, keep it there
-                if (currentTime > maxTime)
+                if (currentTime >= maxTime)
                 {
                     *outNumLoops = *outNumLoops + 1;
                     hasLooped = true;
@@ -458,7 +461,7 @@ namespace EMotionFX
             else
             {
                 // if we passed the end of the motion
-                if (currentTime < mClipStartTime)
+                if (currentTime <= mClipStartTime)
                 {
                     *outNumLoops = *outNumLoops + 1;
                     hasLooped = true;
@@ -556,7 +559,7 @@ namespace EMotionFX
             // check and handle the bounds of the current playtime, to make it loop etc
             if (mMaxLoops == EMFX_LOOPFOREVER) // if it's looping forever
             {
-                if (currentTime > maxTime)
+                if (currentTime >= maxTime)
                 {
                     mCurLoops++;
                     hasLooped = true;
@@ -582,7 +585,7 @@ namespace EMotionFX
             else
             {
                 // if we passed the end of the motion, keep it there
-                if (currentTime > maxTime)
+                if (currentTime >= maxTime)
                 {
                     mCurLoops++;
                     hasLooped = true;
@@ -674,7 +677,7 @@ namespace EMotionFX
             // check and handle the bounds of the current playtime, to make it loop etc
             if (mMaxLoops == EMFX_LOOPFOREVER) // if it's looping forever
             {
-                if (currentTime < mClipStartTime)
+                if (currentTime <= mClipStartTime)
                 {
                     hasLooped = true;
                     mCurLoops++;
@@ -692,7 +695,7 @@ namespace EMotionFX
             else
             {
                 // if we passed the end of the motion
-                if (currentTime < mClipStartTime)
+                if (currentTime <= mClipStartTime)
                 {
                     mCurLoops++;
                     hasLooped = true;
@@ -780,40 +783,8 @@ namespace EMotionFX
         // update the last number of loops
         mLastLoops = mCurLoops;
 
-        // update the last current time
-        mLastCurTime = mCurrentTime;
-
-        // if we are blending towards the destination motion or layer
-        if (GetIsBlending())
-        {
-            // update the weight
-            mWeight += mWeightDelta * timePassed;
-
-            // if we're increasing the weight
-            if (mWeightDelta >= 0)
-            {
-                // if we reached our target weight, don't go past that
-                if (mWeight >= mTargetWeight)
-                {
-                    mWeight = mTargetWeight;
-                    DisableFlag(BOOL_ISBLENDING);
-                    GetEventManager().OnStopBlending(this);
-                }
-            }
-            else // if we're decreasing the weight
-            {
-                // if we reached our target weight, don't let it go lower than that
-                if (mWeight <= mTargetWeight)
-                {
-                    mWeight = mTargetWeight;
-                    DisableFlag(BOOL_ISBLENDING);
-                    GetEventManager().OnStopBlending(this);
-                }
-            }
-        }
-
         // if we're paused, don't update the time values and process motion events
-        if (GetIsPaused() || MCore::Math::Abs(timePassed) <= MCore::Math::epsilon)
+        if (GetIsPaused() || AZ::IsClose(timePassed, 0, AZ::g_fltEps))
         {
             mPassedTime     = 0.0f;
             mLastCurTime    = mCurrentTime;
@@ -821,10 +792,83 @@ namespace EMotionFX
         }
 
         // update the current time value
+        const float currentTimePreUpdate = mCurrentTime;
         UpdateTime(timePassed);
 
-        // process events
-        ProcessEvents(mLastCurTime, mCurrentTime);
+        // If UpdateTime() did not advance mCurrentTime we can skip over ProcessEvents()
+        if (!AZ::IsClose(mLastCurTime, mCurrentTime, AZ::g_fltEps))
+        {
+            // if we are blending towards the destination motion or layer.
+            // Do this after UpdateTime(timePassed) and use (mCurrentTime - mLastCurTime)
+            // as the elapsed time. This will function for Updates that use SetCurrentTime(time, false)
+            // like Simple Motion component does with Track View. This will also work for motions that
+            // have mPlaySpeed that is not 1.0f.
+            if (GetIsBlending())
+            {
+                float deltaTime = 0.0f;
+
+                if (mPlayMode == PLAYMODE_FORWARD)
+                {
+                    // Playing forward, if the motion looped, need to consider the wrapped delta time
+                    if (mLastCurTime > mCurrentTime)
+                    {
+                        // Need to add the last time up to the end of the motion, and the cur time from the start of the motion.
+                        // That will give us the full wrap around time.
+                        deltaTime = (mClipEndTime - mLastCurTime) + (mCurrentTime - mClipStartTime);
+                    }
+                    else
+                    {
+                        // No looping, simple time passed calc.
+                        deltaTime = (mCurrentTime - mLastCurTime);
+                    }
+                }
+                else
+                {
+                    // Playing in reverse, if the motion looped, need to consider the wrapped delta time
+                    if (mLastCurTime < mCurrentTime)
+                    {
+                        // Need to add the last time up to the start of the motion, and the cur time from the end of the motion.
+                        // That will give us the full wrap around time.
+                        deltaTime = (mClipStartTime - mLastCurTime) + (mCurrentTime - mClipEndTime);
+                    }
+                    else
+                    {
+                        // No looping, simple time passed calc.
+                        deltaTime = (mLastCurTime - mCurrentTime);
+                    }
+                }
+
+                // update the weight
+                mWeight += mWeightDelta * deltaTime;
+
+                // if we're increasing the weight
+                if (mWeightDelta >= 0)
+                {
+                    // if we reached our target weight, don't go past that
+                    if (mWeight >= mTargetWeight)
+                    {
+                        mWeight = mTargetWeight;
+                        DisableFlag(BOOL_ISBLENDING);
+                        GetEventManager().OnStopBlending(this);
+                    }
+                }
+                else // if we're decreasing the weight
+                {
+                    // if we reached our target weight, don't let it go lower than that
+                    if (mWeight <= mTargetWeight)
+                    {
+                        mWeight = mTargetWeight;
+                        DisableFlag(BOOL_ISBLENDING);
+                        GetEventManager().OnStopBlending(this);
+                    }
+                }
+            }
+
+            // process events
+            ProcessEvents(mLastCurTime, mCurrentTime);
+        }
+
+        mLastCurTime = currentTimePreUpdate;
     }
 
 

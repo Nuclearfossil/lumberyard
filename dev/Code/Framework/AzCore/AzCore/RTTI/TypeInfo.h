@@ -12,7 +12,7 @@
 #ifndef AZCORE_TYPEINFO_H
 #define AZCORE_TYPEINFO_H
 
-#include <AzCore/std/typetraits/aligned_storage.h>
+#include <AzCore/std/typetraits/static_storage.h>
 #include <AzCore/std/typetraits/is_pointer.h>
 #include <AzCore/std/typetraits/is_const.h>
 #include <AzCore/std/typetraits/is_enum.h>
@@ -187,25 +187,8 @@ namespace AZ
 
         // VS2013 does not handle non-pod function statics correctly in a thread-safe manner
         // VS2015+/clang init them as part of static init, or interlocked (as per standard)
-#if defined(AZ_COMPILER_MSVC) && _MSC_VER <= 1800
-        struct TypeIdHolder
-        {
-            AZStd::aligned_storage<sizeof(AZ::TypeId), 16>::type m_uuidBuffer;
-            AZStd::atomic<const AZ::TypeId*> m_uuid; // This is intentionally not initialized so it doesn't stomp another thread's init
-            TypeIdHolder(const AZ::TypeId& uuid)
-            {
-                m_uuid.store(new (&m_uuidBuffer) AZ::TypeId(uuid));
-            }
-            operator const AZ::TypeId&() const
-            {
-                // spin wait for m_uuid to have the only possible correct value, someone must be constructing it
-                const AZ::TypeId* typeId = nullptr;
-                do {
-                    typeId = m_uuid.load();
-                } while (typeId != reinterpret_cast<const AZ::TypeId*>(&m_uuidBuffer));
-                return *typeId;
-            }
-        };
+#if AZ_TRAIT_COMPILER_USE_STATIC_STORAGE_FOR_NON_POD_STATICS
+        using TypeIdHolder = AZStd::static_storage<AZ::TypeId>;
 #else
         using TypeIdHolder = AZ::TypeId;
 #endif
@@ -309,7 +292,61 @@ namespace AZ
         }
     };
 
-    // specialize for member function pointers?
+    // specialize for member function pointers
+    template<class R, class C, class... Args>
+    struct AzTypeInfo<R(C::*)(Args...), false>
+    {
+        static const char* Name()
+        {
+            static char typeName[128] = { 0 };
+            if (typeName[0] == 0)
+            {
+                AZ::Internal::AzTypeInfoSafeCat(typeName, AZ_ARRAY_SIZE(typeName), "{");
+                AZ::Internal::AzTypeInfoSafeCat(typeName, AZ_ARRAY_SIZE(typeName), AZ::AzTypeInfo<R>::Name());
+                AZ::Internal::AzTypeInfoSafeCat(typeName, AZ_ARRAY_SIZE(typeName), "(");
+                AZ::Internal::AzTypeInfoSafeCat(typeName, AZ_ARRAY_SIZE(typeName), AZ::AzTypeInfo<C>::Name());
+                AZ::Internal::AzTypeInfoSafeCat(typeName, AZ_ARRAY_SIZE(typeName), "::*)");
+                AZ::Internal::AzTypeInfoSafeCat(typeName, AZ_ARRAY_SIZE(typeName), "(");
+                AZ::Internal::AggregateTypes<Args...>::TypeName(typeName, AZ_ARRAY_SIZE(typeName));
+                AZ::Internal::AzTypeInfoSafeCat(typeName, AZ_ARRAY_SIZE(typeName), ")}");
+            }
+            return typeName;
+        }
+        static const AZ::TypeId& Uuid()
+        {
+            static AZ::Internal::TypeIdHolder s_uuid(AZ::Internal::AggregateTypes<R, C, Args...>::Uuid());
+            return s_uuid;
+        }
+    };
+
+    // specialize for const member function pointers
+    template<class R, class C, class... Args>
+    struct AzTypeInfo<R(C::*)(Args...) const, false>
+        : AzTypeInfo<R(C::*)(Args...), false> {};
+
+    // specialize for member data pointers
+    template<class R, class C>
+    struct AzTypeInfo<R C::*, false>
+    {
+        static const char* Name()
+        {
+            static char typeName[64] = { 0 };
+            if (typeName[0] == 0)
+            {
+                AZ::Internal::AzTypeInfoSafeCat(typeName, AZ_ARRAY_SIZE(typeName), "{");
+                AZ::Internal::AzTypeInfoSafeCat(typeName, AZ_ARRAY_SIZE(typeName), AZ::AzTypeInfo<R>::Name());
+                AZ::Internal::AzTypeInfoSafeCat(typeName, AZ_ARRAY_SIZE(typeName), " ");
+                AZ::Internal::AzTypeInfoSafeCat(typeName, AZ_ARRAY_SIZE(typeName), AZ::AzTypeInfo<C>::Name());
+                AZ::Internal::AzTypeInfoSafeCat(typeName, AZ_ARRAY_SIZE(typeName), "::*}");
+            }
+            return typeName;
+        }
+        static const AZ::TypeId& Uuid()
+        {
+            static AZ::Internal::TypeIdHolder s_uuid(AZ::Internal::AggregateTypes<R, C>::Uuid());
+            return s_uuid;
+        }
+    };
 
     // Helper macro to generically specialize const, volatile, pointers, etc
 #define AZ_TYPE_INFO_SPECIALIZE_CV(_T1, _Specialization, _NamePrefix, _NameSuffix)                               \

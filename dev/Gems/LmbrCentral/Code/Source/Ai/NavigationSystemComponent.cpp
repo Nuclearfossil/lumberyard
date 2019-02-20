@@ -25,19 +25,17 @@
 #include <functor.h> // needed in <INavigationSystem.h>
 #include <INavigationSystem.h>
 
-using namespace AZ;
 
 namespace LmbrCentral
 {
-    AZ_CLASS_ALLOCATOR_IMPL(NavRayCastResult, SystemAllocator, 0)
+    AZ_CLASS_ALLOCATOR_IMPL(NavRayCastResult, AZ::SystemAllocator, 0)
 
-    void NavigationSystemComponent::Reflect(ReflectContext* context)
+    void NavigationSystemComponent::Reflect(AZ::ReflectContext* context)
     {
-        if (SerializeContext* serializeContext = azrtti_cast<SerializeContext*>(context))
+        if (AZ::SerializeContext* serializeContext = azrtti_cast<AZ::SerializeContext*>(context))
         {
             serializeContext->Class<NavigationSystemComponent, Component>()
                 ->Version(1)
-                ->SerializerForEmptyClass()
                 ;
 
             serializeContext->Class<NavRayCastResult>()
@@ -48,18 +46,18 @@ namespace LmbrCentral
                 ;
         }
 
-        if (BehaviorContext* behaviorContext = azrtti_cast<BehaviorContext*>(context))
+        if (AZ::BehaviorContext* behaviorContext = azrtti_cast<AZ::BehaviorContext*>(context))
         {
             // RayCastWorld return type
             behaviorContext->Class<NavRayCastResult>()
-                ->Attribute(AZ::Script::Attributes::ExcludeFrom, AZ::Script::Attributes::ExcludeFlags::Preview)
+                ->Attribute(AZ::Script::Attributes::ExcludeFrom, AZ::Script::Attributes::ExcludeFlags::All)
                 ->Property("collision", BehaviorValueGetter(&NavRayCastResult::m_collision), nullptr)
                 ->Property("position", BehaviorValueGetter(&NavRayCastResult::m_position), nullptr)
                 ->Property("meshId", BehaviorValueGetter(&NavRayCastResult::m_meshId), nullptr)
                 ;
 
             behaviorContext->EBus<NavigationSystemRequestBus>("NavigationSystemRequestBus")
-                ->Attribute(AZ::Script::Attributes::ExcludeFrom, AZ::Script::Attributes::ExcludeFlags::Preview)
+                ->Attribute(AZ::Script::Attributes::ExcludeFrom, AZ::Script::Attributes::ExcludeFlags::All)
                 ->Event("RayCast", &NavigationSystemRequestBus::Events::RayCast)
                 ;
         }

@@ -20,6 +20,7 @@
 #include <AzCore/std/smart_ptr/unique_ptr.h>
 
 #include <AzToolsFramework/API/ToolsApplicationAPI.h>
+#include <AzToolsFramework/AssetBrowser/AssetBrowserBus.h>
 
 namespace ScriptCanvasEditor
 {
@@ -27,6 +28,7 @@ namespace ScriptCanvasEditor
         : public AZ::Component
         , private SystemRequestBus::Handler
         , private AzToolsFramework::EditorEvents::Bus::Handler
+        , private AzToolsFramework::AssetBrowser::AssetBrowserInteractionNotificationBus::Handler
     {
     public:
         AZ_COMPONENT(SystemComponent, "{1DE7A120-4371-4009-82B5-8140CB1D7B31}");
@@ -51,6 +53,8 @@ namespace ScriptCanvasEditor
         ////////////////////////////////////////////////////////////////////////
         // SystemRequestBus::Handler        
         void AddAsyncJob(AZStd::function<void()>&& jobFunc) override;
+        void GetEditorCreatableTypes(AZStd::unordered_set<ScriptCanvas::Data::Type>& outCreatableTypes);
+        void CreateEditorComponentsOnEntity(AZ::Entity* entity) override;
         ////////////////////////////////////////////////////////////////////////
 
         ////////////////////////////////////////////////////////////////////////
@@ -58,14 +62,22 @@ namespace ScriptCanvasEditor
         void PopulateEditorGlobalContextMenu(QMenu* menu, const AZ::Vector2& point, int flags) override;
         void NotifyRegisterViews() override;
         ////////////////////////////////////////////////////////////////////////
-
+        
+        ////////////////////////////////////////////////////////////////////////
+        //  AzToolsFramework::AssetBrowser::AssetBrowserInteractionNotificationBus overrides
+        AzToolsFramework::AssetBrowser::SourceFileDetails GetSourceFileDetails(const char* fullSourceFileName) override;
+        ////////////////////////////////////////////////////////////////////////
+        
     private:
-		SystemComponent(const SystemComponent&) = delete;
+        SystemComponent(const SystemComponent&) = delete;
 
         void FilterForScriptCanvasEnabledEntities(AzToolsFramework::EntityIdList& sourceList, AzToolsFramework::EntityIdList& targetList);
+        void PopulateEditorCreatableTypes();
 
         AZStd::unique_ptr<AZ::JobManager> m_jobManager;
         AZStd::unique_ptr<AZ::JobContext> m_jobContext;
         DocumentContext m_documentContext;
+        AZStd::vector<AZStd::unique_ptr<AzToolsFramework::PropertyHandlerBase>> m_propertyHandlers;
+        AZStd::unordered_set<ScriptCanvas::Data::Type> m_creatableTypes;
     };
 }

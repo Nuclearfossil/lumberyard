@@ -17,7 +17,8 @@
 #include "Attribute.h"
 #include "Vector.h"
 #include "Color.h"
-
+#include "StringConversions.h"
+#include <MCore/Source/AttributeAllocator.h>
 
 namespace MCore
 {
@@ -28,6 +29,8 @@ namespace MCore
     class MCORE_API AttributeColor
         : public Attribute
     {
+        AZ_CLASS_ALLOCATOR(AttributeColor, AttributeAllocator, 0)
+
         friend class AttributeFactory;
     public:
         enum
@@ -44,11 +47,9 @@ namespace MCore
 
         MCORE_INLINE uint8* GetRawDataPointer()                     { return reinterpret_cast<uint8*>(&mValue); }
         MCORE_INLINE uint32 GetRawDataSize() const                  { return sizeof(RGBAColor); }
-        bool GetSupportsRawDataPointer() const override             { return true; }
 
         // overloaded from the attribute base class
         Attribute* Clone() const override                           { return AttributeColor::Create(mValue); }
-        Attribute* CreateInstance(void* destMemory) override        { return new(destMemory) AttributeColor(); }
         const char* GetTypeString() const override                  { return "AttributeColor"; }
         bool InitFrom(const Attribute* other) override
         {
@@ -59,17 +60,17 @@ namespace MCore
             mValue = static_cast<const AttributeColor*>(other)->GetValue();
             return true;
         }
-        bool InitFromString(const String& valueString) override
+        bool InitFromString(const AZStd::string& valueString) override
         {
-            if (valueString.CheckIfIsValidVector4() == false)
+            AZ::Vector4 vec4;
+            if (!AzFramework::StringFunc::LooksLikeVector4(valueString.c_str(), &vec4))
             {
                 return false;
             }
-            AZ::Vector4 vec = valueString.ToVector4();
-            mValue.Set(vec.GetX(), vec.GetY(), vec.GetZ(), vec.GetW());
+            mValue.Set(vec4.GetX(), vec4.GetY(), vec4.GetZ(), vec4.GetW());
             return true;
         }
-        bool ConvertToString(String& outString) const override      { outString.FromVector4(AZ::Vector4(mValue.r, mValue.g, mValue.b, mValue.a)); return true; }
+        bool ConvertToString(AZStd::string& outString) const override      { AZStd::to_string(outString, AZ::Vector4(mValue.r, mValue.g, mValue.b, mValue.a)); return true; }
         uint32 GetClassSize() const override                        { return sizeof(AttributeColor); }
         uint32 GetDefaultInterfaceType() const override             { return ATTRIBUTE_INTERFACETYPE_COLOR; }
 
@@ -104,18 +105,5 @@ namespace MCore
             return true;
         }
 
-
-        // write to a stream
-        bool WriteData(MCore::Stream* stream, MCore::Endian::EEndianType targetEndianType) const override
-        {
-            RGBAColor streamValue = mValue;
-            Endian::ConvertRGBAColorTo(&streamValue, targetEndianType);
-            if (stream->Write(&streamValue, sizeof(RGBAColor)) == 0)
-            {
-                return false;
-            }
-
-            return true;
-        }
     };
 }   // namespace MCore

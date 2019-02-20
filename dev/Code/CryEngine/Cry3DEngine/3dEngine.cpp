@@ -15,7 +15,6 @@
 
 
 #include "StdAfx.h"
-#include <CryEngineAPI.h>
 #include <ICryAnimation.h>
 #include <IFaceGen.h>
 #include <IGameFramework.h>
@@ -72,15 +71,10 @@
 #include "Environment/OceanEnvironmentBus.h"
 #include <limits>
 
-#if defined(FEATURE_SVO_GI)
-#include "SVO/SceneTreeManager.h"
-#endif
-
 #if !defined(EXCLUDE_DOCUMENTATION_PURPOSE)
 #include "PrismRenderNode.h"
 #endif // EXCLUDE_DOCUMENTATION_PURPOSE
 
-#include <IJobManager_JobDelegator.h>
 #include <AzFramework/IO/FileOperations.h>
 #include <AzCore/Jobs/LegacyJobExecutor.h>
 #include <AzCore/Math/MathUtils.h>
@@ -529,8 +523,6 @@ bool C3DEngine::Init()
     AZ_Assert(tempPoolSize != 0, "Temp pool size should not be 0.");
 
     {
-        MEMSTAT_CONTEXT(EMemStatContextTypes::MSC_Other, 0, "3Engine Temp Pool");
-
         if (!CTemporaryPool::Initialize(tempPoolSize))
         {
             AZ_Assert(false, "Could not initialize initialize temporary pool for 3D Engine startup.");
@@ -1159,12 +1151,10 @@ void C3DEngine::UpdateRenderingCamera(const char* szCallerName, const SRendering
 {
     CCamera newCam = passInfo.GetCamera();
 
-#if defined(FEATURE_SVO_GI)
     if (passInfo.IsGeneralPass())
     {
-        CSvoManager::Update(passInfo, newCam);
+        SVOGILegacyRequestBus::Broadcast(&SVOGILegacyRequests::UpdateVoxelData);
     }
-#endif
 
     if (GetFloatCVar(e_CameraRotationSpeed))
     {
@@ -1186,7 +1176,7 @@ void C3DEngine::UpdateRenderingCamera(const char* szCallerName, const SRendering
         {
             Ang3 aAngDeg;
             Vec3 vPos;
-            int args = sscanf(pCamGoto, "%f %f %f %f %f %f", &vPos.x, &vPos.y, &vPos.z, &aAngDeg.x, &aAngDeg.y, &aAngDeg.z);
+            int args = azsscanf(pCamGoto, "%f %f %f %f %f %f", &vPos.x, &vPos.y, &vPos.z, &aAngDeg.x, &aAngDeg.y, &aAngDeg.z);
             if (args >= 3)
             {
                 Vec3 curPos = newCam.GetPosition();
@@ -1237,7 +1227,7 @@ void C3DEngine::UpdateRenderingCamera(const char* szCallerName, const SRendering
 
     // now we have a valid camera, we can start generation of the occlusion buffer
     // only needed for editor here, in game we spawn the job more early
-    if (passInfo.IsGeneralPass() && GetCVars()->e_StatObjBufferRenderTasks && JobManager::InvokeAsJob("CheckOcclusion"))
+    if (passInfo.IsGeneralPass() && GetCVars()->e_StatObjBufferRenderTasks)
     {
         if (gEnv->IsEditor())
         {
@@ -1284,6 +1274,50 @@ void C3DEngine::UpdateRenderingCamera(const char* szCallerName, const SRendering
     m_deferredRenderComponentStreamingPriorityUpdates.resize(0);
 }
 
+void C3DEngine::GetSvoStaticTextures(I3DEngine::SSvoStaticTexInfo& svoInfo, PodArray<I3DEngine::SLightTI>* pLightsTI_S, PodArray<I3DEngine::SLightTI>* pLightsTI_D)
+{
+    SVOGILegacyRequestBus::Broadcast(&SVOGILegacyRequests::GetSvoStaticTextures, svoInfo, pLightsTI_S, pLightsTI_D);
+}
+
+void C3DEngine::GetSvoBricksForUpdate(PodArray<SSvoNodeInfo>& arrNodeInfo, bool getDynamic)
+{
+    SVOGILegacyRequestBus::Broadcast(&SVOGILegacyRequests::GetSvoBricksForUpdate, arrNodeInfo, getDynamic);
+}
+
+#if defined(FEATURE_SVO_GI)
+void C3DEngine::LoadTISettings(XmlNodeRef pInputNode)
+{
+    const char* szXmlNodeName = "Total_Illumination_v2";
+    if (gEnv->pConsole->GetCVar("e_svoTI_Active"))
+    {
+        gEnv->pConsole->GetCVar("e_svoTI_Active")->Set(GetXMLAttribText(pInputNode, szXmlNodeName, "Active", "0"));
+
+        gEnv->pConsole->GetCVar("e_svoTI_InjectionMultiplier")->Set(GetXMLAttribText(pInputNode, szXmlNodeName, "InjectionMultiplier", "0"));
+
+        gEnv->pConsole->GetCVar("e_svoTI_NumberOfBounces")->Set(GetXMLAttribText(pInputNode, szXmlNodeName, "NumberOfBounces", "0"));
+
+        gEnv->pConsole->GetCVar("e_svoTI_Saturation")->Set(GetXMLAttribText(pInputNode, szXmlNodeName, "Saturation", "0"));
+
+        gEnv->pConsole->GetCVar("e_svoTI_ConeMaxLength")->Set(GetXMLAttribText(pInputNode, szXmlNodeName, "ConeMaxLength", "0"));
+
+        gEnv->pConsole->GetCVar("e_svoTI_DiffuseConeWidth")->Set(GetXMLAttribText(pInputNode, szXmlNodeName, "DiffuseConeWidth", "0"));
+
+        gEnv->pConsole->GetCVar("e_svoTI_SSAOAmount")->Set(GetXMLAttribText(pInputNode, szXmlNodeName, "SSAOAmount", "0"));
+        gEnv->pConsole->GetCVar("e_svoTI_UseLightProbes")->Set(GetXMLAttribText(pInputNode, szXmlNodeName, "UseLightProbes", "0"));
+        gEnv->pConsole->GetCVar("e_svoTI_AmbientOffsetRed")->Set(GetXMLAttribText(pInputNode, szXmlNodeName, "AmbientOffsetRed", "1"));
+        gEnv->pConsole->GetCVar("e_svoTI_AmbientOffsetGreen")->Set(GetXMLAttribText(pInputNode, szXmlNodeName, "AmbientOffsetGreen", "1"));
+        gEnv->pConsole->GetCVar("e_svoTI_AmbientOffsetBlue")->Set(GetXMLAttribText(pInputNode, szXmlNodeName, "AmbientOffsetBlue", "1"));
+        gEnv->pConsole->GetCVar("e_svoTI_AmbientOffsetBias")->Set(GetXMLAttribText(pInputNode, szXmlNodeName, "AmbientOffsetBias", ".1"));
+
+        gEnv->pConsole->GetCVar("e_svoTI_IntegrationMode")->Set(GetXMLAttribText(pInputNode, szXmlNodeName, "IntegrationMode", "0"));
+
+        if (gEnv->pConsole->GetCVar("e_svoTI_IntegrationMode")->GetIVal() < 1) // AO
+        {
+            gEnv->pConsole->GetCVar("e_svoTI_NumberOfBounces")->Set("1");
+        }
+    }
+}
+#endif
 void C3DEngine::PrepareOcclusion(const CCamera& rCamera)
 {
     if (!gEnv->IsEditor() && GetCVars()->e_StatObjBufferRenderTasks && !gEnv->IsFMVPlaying() && (!IsEquivalent(rCamera.GetPosition(), Vec3(0, 0, 0), VEC_EPSILON) || GetRenderer()->IsPost3DRendererEnabled()))
@@ -1885,17 +1919,43 @@ IPhysMaterialEnumerator* C3DEngine::GetPhysMaterialEnumerator()
 
 float C3DEngine::GetDistanceToSectorWithWater()
 {
-    // If there's no terrain or no ocean, return an arbitrarily large number.
-    if (!m_pTerrain || !m_pTerrain->GetRootNode() || (OceanToggle::IsActive() && !OceanRequest::OceanIsEnabled()))
+    const Vec3 camPosition = GetRenderingCamera().GetPosition();
+    const float minDistance = 0.1f;
+    const bool oceanActive = OceanToggle::IsActive();
+    const bool oceanEnabled = OceanRequest::OceanIsEnabled();
+    float distance = minDistance;
+
+    if (oceanActive && !oceanEnabled)
     {
-        return std::numeric_limits<float>::infinity();
+        distance = std::numeric_limits<float>::infinity();
+    }
+    else if (!m_pTerrain || !m_pTerrain->GetRootNode())
+    {
+        // if there is no terrain, or it is invalid, check if we still have an ocean
+        if (oceanActive && oceanEnabled)
+        {
+            distance = camPosition.z - OceanRequest::GetOceanLevel();
+        }
+        else
+        {
+            distance = std::numeric_limits<float>::infinity();
+        }
+    }
+    else
+    {
+        // if the camera is over terrain, try to use the terrain's stored distance to water
+        bool bCameraInTerrainBounds = Overlap::Point_AABB2D(camPosition, m_pTerrain->GetRootNode()->GetBBoxVirtual());
+        if (bCameraInTerrainBounds && (m_pTerrain->GetDistanceToSectorWithWater() > minDistance))
+        {
+            distance = m_pTerrain->GetDistanceToSectorWithWater();
+        }
+        else
+        {
+            distance = camPosition.z - (oceanActive ? OceanRequest::GetOceanLevel() : GetWaterLevel());
+        }
     }
 
-    Vec3 camPostion = GetRenderingCamera().GetPosition();
-    bool bCameraInTerrainBounds = Overlap::Point_AABB2D(camPostion, m_pTerrain->GetRootNode()->GetBBoxVirtual());
-
-    return (bCameraInTerrainBounds && (m_pTerrain && m_pTerrain->GetDistanceToSectorWithWater() > 0.1f))
-           ? m_pTerrain->GetDistanceToSectorWithWater() : max(camPostion.z - OceanToggle::IsActive() ? OceanRequest::GetOceanLevel() : GetWaterLevel(), 0.1f);
+    return max(distance, minDistance);
 }
 
 Vec3 C3DEngine::GetSunColor() const
@@ -2172,7 +2232,16 @@ void C3DEngine::ActivatePortal(const Vec3& vPos, bool bActivate, const char* szE
 
 bool C3DEngine::SetStatInstGroup(int nGroupId, const IStatInstGroup& siGroup, int nSID)
 {
-    assert(nSID >= 0 && nSID < m_pObjManager->GetListStaticTypes().Count());
+    if (m_pObjManager->GetListStaticTypes().Count() == 0)
+    {
+        AZ_Warning("C3DEngine", false, "Trying to set a Stat instance without an initialized Object manager.  This might be caused by using the vegetation system without terrain.");
+        return false;
+    }
+    if ((nSID < 0) || (nSID >= m_pObjManager->GetListStaticTypes().Count()))
+    {
+        AZ_Assert(false, "Invalid StatInst ID: %d (should be > 0 and < %d)", nSID, m_pObjManager->GetListStaticTypes().Count());
+        return false;
+    }
 
     m_fRefreshSceneDataCVarsSumm = -100;
 
@@ -2333,20 +2402,6 @@ void C3DEngine::UpdateStatInstGroups()
 
 void C3DEngine::GetMemoryUsage(class ICrySizer* pSizer) const
 {
-#if !defined(AZ_MONOLITHIC_BUILD) // Only when compiling as dynamic library
-    //  {
-    //SIZER_COMPONENT_NAME(pSizer,"Strings");
-    //pSizer->AddObject( (this+1),string::_usedMemory(0) );
-    //  }
-    {
-        SIZER_COMPONENT_NAME(pSizer, "STL Allocator Waste");
-        CryModuleMemoryInfo meminfo;
-        ZeroStruct(meminfo);
-        CryGetMemoryInfoForModule(&meminfo);
-        pSizer->AddObject((this + 2), (size_t)meminfo.STL_wasted);
-    }
-#endif
-
     pSizer->AddObject(this, sizeof(*this) + (GetCVars()->e_StreamCgfDebug ? 100 * 1024 * 1024 : 0));
     pSizer->AddObject(m_pCVars);
 
@@ -3651,19 +3706,6 @@ Vec3 C3DEngine::GetTerrainSurfaceNormal(Vec3 vPos)
     return m_pTerrain ? m_pTerrain->GetTerrainSurfaceNormal(vPos, 0.5f * GetHeightMapUnitSize()) : Vec3(0.f, 0.f, 1.f);
 }
 
-IMemoryBlock* C3DEngine::Voxel_GetObjects(Vec3 vPos, float fRadius, int nSurfaceTypeId, EVoxelEditOperation eOperation, EVoxelBrushShape eShape, EVoxelEditTarget eTarget)
-{
-    return 0;
-}
-
-void C3DEngine::Voxel_Paint(Vec3 vPos, float fRadius, int nSurfaceTypeId, Vec3 vBaseColor, EVoxelEditOperation eOperation, EVoxelBrushShape eShape, EVoxelEditTarget eTarget, PodArray<IRenderNode*>* pBrushes, float fVoxelSize)
-{
-}
-
-void C3DEngine::Voxel_SetFlags(bool bPhysics, bool bSimplify, bool bShadows, bool bMaterials)
-{
-}
-
 //////////////////////////////////////////////////////////////////////////
 IIndexedMesh* C3DEngine::CreateIndexedMesh()
 {
@@ -3836,6 +3878,11 @@ int C3DEngine::GetTerrainTextureNodeSizeMeters()
         return m_pTerrain->GetTerrainTextureNodeSizeMeters();
     }
     return 0;
+}
+
+bool C3DEngine::GetShowTerrainSurface()
+{
+    return m_bShowTerrainSurface;
 }
 
 ITerrain* C3DEngine::CreateTerrain(const STerrainInfo& TerrainInfo)
@@ -5880,7 +5927,7 @@ void CDebugDrawListMgr::CheckFilterCVar()
 
     const char* pVal = pCVar->GetString();
 
-    if (pVal && strcmpi(pVal, "all") == 0)
+    if (pVal && azstricmp(pVal, "all") == 0)
     {
         m_filter = I3DEngine::DLOT_ALL;
         return;

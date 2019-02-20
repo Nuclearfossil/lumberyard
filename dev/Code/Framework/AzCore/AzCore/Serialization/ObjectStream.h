@@ -58,6 +58,7 @@ namespace AZ
             ST_XML,
             ST_JSON,
             ST_BINARY,
+            ST_MAX // insert new types before this.
         };
 
         StreamType  GetType() const         { return m_type; }
@@ -113,23 +114,44 @@ namespace AZ
         /// Called to indicate that loading has completed
         typedef AZStd::function< void (Handle /*objectstream*/, bool /*success*/) > CompletionCB;
 
+        /// Filter flags control the overall behavior of the serialize operation and can cause it to skip over unnecessary data (the default)
+        /// or instead throw an error and fail if any error is encountered.
         enum FilterFlags
         {
-            FILTERFLAG_IGNORE_UNKNOWN_CLASSES = 1 << 0,  /// If not set, an error is raised for each unknown class encountered during serialization.
+            /** 
+            * If the FILTERFLAG_STRICT flag is set, the serialization operation will return false (failure to deserialize) if ANY error has occurred at all
+            * even non-fatal errors.  So any kind of issue - asset missing, unknown class, non-deprecatd class, container failure, even things which it can
+            * continue reading through and ignore safely, will cause it to return false for the entire serialization.  This should only be used in cases
+            * where the incoming data is EXPECTED to be 100% pristine (network payloads sent between clients of the same version for example)
+            *
+            * Note that even in non-strict mode, if errors are encountered, they will still be emitted as errors, but the serializer will continue and
+            * not return "false" for the entire operation just becuase of a single recoverable error.
+            **/
+            FILTERFLAG_STRICT                   = 1 << 0,
+            
+            /** 
+            * if FILTERFLAG_IGNORE_UNKNOWN_CLASSES is set, deprecated or unrecognized classes will be SILENTLY ignored with no error output.
+            * this is only to be rarely used, when reading data you know contains classes that you want to ignore silently, not for ignoring errors in general.
+            */ 
+            FILTERFLAG_IGNORE_UNKNOWN_CLASSES   = 1 << 1, 
+            
         };
 
         struct FilterDescriptor
         {
+            // boilerplate
             FilterDescriptor(const FilterDescriptor& rhs)
                 : m_flags(rhs.m_flags)
                 , m_assetCB(rhs.m_assetCB)
             {}
-            FilterDescriptor(const Data::AssetFilterCB& assetFilterCB = nullptr, u32 filterFlags = 0)
+            
+            // intentionally explicit - you may not auto-convert from a assetFilterCB to a FilterDescriptor by accident - this is to prevent the loss of the above filter flags unintentionally
+            explicit FilterDescriptor(const Data::AssetFilterCB& assetFilterCB = nullptr, u32 filterFlags = 0)
                 : m_flags(filterFlags)
                 , m_assetCB(assetFilterCB)
             {}
 
-            u32 m_flags;
+            u32 m_flags = 0;
             Data::AssetFilterCB m_assetCB;
         };
 
@@ -151,15 +173,13 @@ namespace AZ
         template<typename T>
         bool WriteClass(const T* obj, const char* elemName = nullptr);
 
-        /// Default asset filter obeys the Asset<> holder's load flags.
-        static bool AssetFilterDefault(const Data::Asset<Data::AssetData>& asset);
 
-        /// SlicesOnly filter ignores all asset references except for slices.
-        static bool AssetFilterSlicesOnly(const Data::Asset<Data::AssetData>& asset);
+        /// Filter ignores all asset references except for the specified classes.
+        template<typename T>
+        static bool AssetFilterAssetTypesOnly(const Data::Asset<Data::AssetData>& asset);
 
-        /// NoAssetLoading filter ignores all asset references.
-        static bool AssetFilterNoAssetLoading(const Data::Asset<Data::AssetData>& asset);
-
+        template<typename T0, typename T1, typename... Args>
+        static bool AssetFilterAssetTypesOnly(const Data::Asset<Data::AssetData>& asset);
     protected:
         ObjectStream(SerializeContext* sc)
             : m_sc(sc)   { AZ_Assert(m_sc, "Creating an object stream with sc = NULL is pointless!"); }
@@ -195,6 +215,28 @@ namespace AZ
         }
         return WriteClass(classPtr, classId);
     }
+
+    /// Filter ignores all asset references except for the specified classes.
+    template<typename T>
+    /*static*/ bool ObjectStream::AssetFilterAssetTypesOnly(const Data::Asset<Data::AssetData>& asset)
+    {
+        static_assert(std::is_base_of<Data::AssetData, T>::value, "T not derived from Data::AssetData.");
+
+        const bool isValidAsset = asset.GetType() == AzTypeInfo<T>::Uuid();
+        if (isValidAsset)
+        {
+            return 0 == (asset.GetFlags() & static_cast<u8>(AZ::Data::AssetLoadBehavior::NoLoad));
+        }
+
+        return false;
+    }
+
+    template<typename T0, typename T1, typename... Args>
+    /*static*/ bool ObjectStream::AssetFilterAssetTypesOnly(const Data::Asset<Data::AssetData>& asset)
+    {
+        return ObjectStream::AssetFilterAssetTypesOnly<T0>(asset) || AssetFilterAssetTypesOnly<T1, Args...>(asset);
+    }
+
 } // namespace AZ
 
 #endif  // AZCORE_OBJECT_STREAM_H

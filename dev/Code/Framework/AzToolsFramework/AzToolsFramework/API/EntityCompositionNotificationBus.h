@@ -14,10 +14,13 @@
 #include <AzCore/base.h>
 #include <AzCore/EBus/EBus.h>
 #include <AzCore/Serialization/SerializeContext.h>
+#include <AzCore/Component/ComponentBus.h>
 #include <AzCore/Component/Entity.h>
 
 namespace AzToolsFramework
 {
+    using EntityIdList = AZStd::vector<AZ::EntityId>;
+
     class EntityCompositionNotifications
         : public AZ::EBusTraits
     {
@@ -36,6 +39,15 @@ namespace AzToolsFramework
         * \param entityIds Entities changed
         */
         virtual void OnEntityCompositionChanged(const AzToolsFramework::EntityIdList& /*entityIds*/) {};
+
+        /*!@{
+         * Discrete composition events for adding, removing, enabling and disabling components
+        */
+        virtual void OnEntityComponentAdded(const AZ::EntityId& /*entityId*/, const AZ::ComponentId& /*componentId*/) {};
+        virtual void OnEntityComponentRemoved(const AZ::EntityId& /*entityId*/, const AZ::ComponentId& /*componentId*/) {};
+        virtual void OnEntityComponentEnabled(const AZ::EntityId& /*entityId*/, const AZ::ComponentId& /*componentId*/) {};
+        virtual void OnEntityComponentDisabled(const AZ::EntityId& /*entityId*/, const AZ::ComponentId& /*componentId*/) {};
+        //!@}
     };
 
     using EntityCompositionNotificationBus = AZ::EBus<EntityCompositionNotifications>;

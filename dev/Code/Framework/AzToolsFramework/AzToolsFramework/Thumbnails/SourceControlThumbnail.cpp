@@ -25,7 +25,9 @@ namespace AzToolsFramework
         SourceControlThumbnailKey::SourceControlThumbnailKey(const char* fileName)
             : ThumbnailKey()
             , m_fileName(fileName)
+            , m_updateInterval(4)
         {
+            m_nextUpdate = AZStd::chrono::system_clock::now();
         }
 
         const AZStd::string& SourceControlThumbnailKey::GetFileName() const
@@ -33,16 +35,33 @@ namespace AzToolsFramework
             return m_fileName;
         }
 
+        bool SourceControlThumbnailKey::UpdateThumbnail()
+        {
+            if (!IsReady() || !SourceControlThumbnail::ReadyForUpdate())
+            {
+                return false;
+            }
+
+            const auto now(AZStd::chrono::system_clock::now());
+            if (m_nextUpdate >= now)
+            {
+                return false;
+            }
+            m_nextUpdate = now + m_updateInterval;
+            emit UpdateThumbnailSignal();
+            return true;
+        }
+
         //////////////////////////////////////////////////////////////////////////
         // SourceControlThumbnail
         //////////////////////////////////////////////////////////////////////////
-        const float SourceControlThumbnail::UPDATE_INTERVAL_S = 30.0f;
-        const char* SourceControlThumbnail::CHECKEDOUT_ICON_PATH = "Editor/Icons/AssetBrowser/checkedOut.png";
-        const char* SourceControlThumbnail::READONLY_ICON_PATH = "Editor/Icons/AssetBrowser/notCheckedOut.png";
+        static const char* WRITABLE_ICON_PATH = "Editor/Icons/AssetBrowser/Writable_16.png";
+        static const char* NONWRITABLE_ICON_PATH = "Editor/Icons/AssetBrowser/NonWritable_16.png";
+
+        bool SourceControlThumbnail::m_readyForUpdate = true;
 
         SourceControlThumbnail::SourceControlThumbnail(SharedThumbnailKey key, int thumbnailSize)
             : Thumbnail(key, thumbnailSize)
-            , m_timeToUpdate(UPDATE_INTERVAL_S)
         {
             BusConnect();
         }
@@ -52,55 +71,32 @@ namespace AzToolsFramework
             BusDisconnect();
         }
 
-        void SourceControlThumbnail::UpdateTime(float deltaTime)
-        {
-            // update source control status every UPDATE_INTERVAL_S secounds
-            if (m_readyToUpdate)
-            {
-                if (m_timeToUpdate > 0)
-                {
-                    m_timeToUpdate -= deltaTime;
-                }
-                else
-                {
-                    m_readyToUpdate = false;
-                    m_timeToUpdate = UPDATE_INTERVAL_S;
-                    QFuture<void> future = QtConcurrent::run([this]() { LoadThread(); });
-                    m_watcher.setFuture(future);
-                }
-            }
-        }
-
         void SourceControlThumbnail::FileStatusChanged(const char* filename)
         {
             // when file status is changed, force instant update
-            auto sourceControlKey = qobject_cast<const SourceControlThumbnailKey*>(m_key);
+            auto sourceControlKey = azrtti_cast<const SourceControlThumbnailKey*>(m_key.data());
             AZ_Assert(sourceControlKey, "Incorrect key type, excpected SourceControlThumbnailKey");
 
             AZStd::string myFileName(sourceControlKey->GetFileName());
             AzFramework::StringFunc::Path::Normalize(myFileName);
             if (AzFramework::StringFunc::Equal(myFileName.c_str(), filename))
             {
-                m_timeToUpdate = 0;
+                Update();
             }
         }
 
-        void SourceControlThumbnail::LoadThread()
+        void SourceControlThumbnail::RequestSourceControlStatus()
         {
-            auto sourceControlKey = qobject_cast<const SourceControlThumbnailKey*>(m_key);
+            auto sourceControlKey = azrtti_cast<const SourceControlThumbnailKey*>(m_key.data());
             AZ_Assert(sourceControlKey, "Incorrect key type, excpected SourceControlThumbnailKey");
 
             bool isSourceControlActive = false;
             SourceControlConnectionRequestBus::BroadcastResult(isSourceControlActive, &SourceControlConnectionRequests::IsActive);
             if (isSourceControlActive && SourceControlCommandBus::FindFirstHandler() != nullptr)
             {
+                m_readyForUpdate = false;
                 SourceControlCommandBus::Broadcast(&SourceControlCommands::GetFileInfo, sourceControlKey->GetFileName().c_str(),
                     AZStd::bind(&SourceControlThumbnail::SourceControlFileInfoUpdated, this, AZStd::placeholders::_1, AZStd::placeholders::_2));
-                m_sourceControlWait.acquire();
-            }
-            else
-            {
-                m_pixmap = QPixmap();
             }
         }
 
@@ -108,21 +104,31 @@ namespace AzToolsFramework
         {
             if (succeeded)
             {
-                if (fileInfo.HasFlag(AzToolsFramework::SCF_OpenByUser))
+                if (fileInfo.HasFlag(AzToolsFramework::SCF_Writeable))
                 {
-                    m_pixmap = QPixmap(CHECKEDOUT_ICON_PATH);
+                    m_pixmap = QPixmap(WRITABLE_ICON_PATH);
                 }
                 else
                 {
-                    m_pixmap = QPixmap(READONLY_ICON_PATH);
+                    m_pixmap = QPixmap(NONWRITABLE_ICON_PATH);
                 }
             }
             else
             {
                 m_pixmap = QPixmap();
             }
-            m_sourceControlWait.release();
-            m_readyToUpdate = true;
+            m_readyForUpdate = true;
+            emit Updated();
+        }
+
+        void SourceControlThumbnail::Update()
+        {
+            RequestSourceControlStatus();
+        }
+
+        bool SourceControlThumbnail::ReadyForUpdate()
+        {
+            return m_readyForUpdate;
         }
 
         //////////////////////////////////////////////////////////////////////////
@@ -137,12 +143,7 @@ namespace AzToolsFramework
 
         bool SourceControlThumbnailCache::IsSupportedThumbnail(SharedThumbnailKey key) const
         {
-            auto productThumbnailKey = qobject_cast<const SourceControlThumbnailKey*>(key.data());
-            if (!productThumbnailKey)
-            {
-                return false;
-            }
-            return true;
+            return azrtti_istypeof<const SourceControlThumbnailKey*>(key.data());
         }
     } // namespace Thumbnailer
 } // namespace AzToolsFramework

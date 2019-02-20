@@ -320,6 +320,23 @@ RenderTargetData::~RenderTargetData()
 }
 //===============================================================================
 
+
+#if defined(AZ_RESTRICTED_PLATFORM)
+#undef AZ_RESTRICTED_SECTION
+#define D3DTEXTURE_CPP_SECTION_1 1
+#define D3DTEXTURE_CPP_SECTION_2 2
+#define D3DTEXTURE_CPP_SECTION_3 3
+#define D3DTEXTURE_CPP_SECTION_4 4
+#define D3DTEXTURE_CPP_SECTION_5 5
+#define D3DTEXTURE_CPP_SECTION_6 6
+#define D3DTEXTURE_CPP_SECTION_7 7
+#define D3DTEXTURE_CPP_SECTION_8 8
+#define D3DTEXTURE_CPP_SECTION_9 9
+#define D3DTEXTURE_CPP_SECTION_10 10
+#define D3DTEXTURE_CPP_SECTION_11 11
+#define D3DTEXTURE_CPP_SECTION_12 12
+#endif
+
 #if defined(TEXTURE_GET_SYSTEM_COPY_SUPPORT)
 byte* CTexture::Convert(const byte* sourceData, int nWidth, int nHeight, int sourceMipCount, ETEX_Format eTFSrc, ETEX_Format eTFDst, int& nOutSize, bool bLinear)
 {
@@ -424,7 +441,6 @@ D3DSurface* CTexture::GetSurface(int nCMSide, int nLevel)
 
     if (!pTargSurf)
     {
-        MEMSTAT_CONTEXT_FMT(EMemStatContextTypes::MSC_Texture, 0, "Create Render Target: %s", GetSourceName());
         int nMipLevel = 0;
         int nSlice = 0;
         int nSliceCount = -1;
@@ -514,7 +530,15 @@ bool CTexture::IsDeviceFormatTypeless(D3DFormat nFormat)
     case DXGI_FORMAT_EAC_RG11_TYPELESS:
 #endif
 
+#if defined(AZ_RESTRICTED_PLATFORM)
+#define AZ_RESTRICTED_SECTION D3DTEXTURE_CPP_SECTION_1
+#include AZ_RESTRICTED_FILE(D3DTexture_cpp, AZ_RESTRICTED_PLATFORM)
+#endif
+#if defined(AZ_RESTRICTED_SECTION_IMPLEMENTED)
+#undef AZ_RESTRICTED_SECTION_IMPLEMENTED
+#else
     case DXGI_FORMAT_BC6H_TYPELESS:
+#endif
     case DXGI_FORMAT_BC7_TYPELESS:
 
 #ifdef CRY_USE_METAL
@@ -1366,10 +1390,18 @@ D3DFormat CTexture::ConvertToTypelessFmt(D3DFormat fmt)
     case DXGI_FORMAT_BC5_SNORM:
         return DXGI_FORMAT_BC5_TYPELESS;
 
+#if defined(AZ_RESTRICTED_PLATFORM)
+#define AZ_RESTRICTED_SECTION D3DTEXTURE_CPP_SECTION_2
+#include AZ_RESTRICTED_FILE(D3DTexture_cpp, AZ_RESTRICTED_PLATFORM)
+#endif
+#if defined(AZ_RESTRICTED_SECTION_IMPLEMENTED)
+#undef AZ_RESTRICTED_SECTION_IMPLEMENTED
+#else
     case DXGI_FORMAT_BC6H_UF16:
         return DXGI_FORMAT_BC6H_TYPELESS;
     case DXGI_FORMAT_BC6H_SF16:
         return DXGI_FORMAT_BC6H_TYPELESS;
+#endif
     case DXGI_FORMAT_BC7_UNORM:
         return DXGI_FORMAT_BC7_TYPELESS;
     case DXGI_FORMAT_BC7_UNORM_SRGB:
@@ -2110,7 +2142,16 @@ bool CTexture::CreateRenderTarget(ETEX_Format eTF, const ColorF& cClear)
     PostCreate();
 
     // Assign name to RT for enhanced debugging
-#if !defined(_RELEASE) && (defined(WIN32) || AZ_ENABLE_GNM_PA_DEBUG)
+#if !defined(_RELEASE)
+#if defined(WIN32)
+#define D3DTEXTURE_CPP_USE_PRIVATEDATA
+#elif defined(AZ_RESTRICTED_PLATFORM)
+#define AZ_RESTRICTED_SECTION D3DTEXTURE_CPP_SECTION_3
+#include AZ_RESTRICTED_FILE(D3DTexture_cpp, AZ_RESTRICTED_PLATFORM)
+#endif
+#endif
+
+#if defined(D3DTEXTURE_CPP_USE_PRIVATEDATA)
 	if (bRes)
     {
         m_pDevTexture->GetBaseTexture()->SetPrivateData(WKPDID_D3DDebugObjectName, strlen(m_SrcName.c_str()), m_SrcName.c_str());
@@ -2163,8 +2204,13 @@ bool CTexture::CreateDeviceTexture(const byte* pData[6])
     if (gRenDev->m_pRT->RC_CreateDeviceTexture(this, pData))
     {
         // Assign name to Texture for enhanced debugging
-#if !defined(RELEASE) && (defined (WIN64))
+#if !defined(RELEASE)
+#if defined (WIN64)
         m_pDevTexture->GetBaseTexture()->SetPrivateData(WKPDID_D3DDebugObjectName, strlen(m_SrcName.c_str()), m_SrcName.c_str());
+#elif defined(AZ_RESTRICTED_PLATFORM)
+#define AZ_RESTRICTED_SECTION D3DTEXTURE_CPP_SECTION_4
+#include AZ_RESTRICTED_FILE(D3DTexture_cpp, AZ_RESTRICTED_PLATFORM)
+#endif
 #endif
 
         return true;
@@ -2185,19 +2231,14 @@ void CTexture::Unbind()
 
 bool CTexture::RT_CreateDeviceTexture(const byte* pData[6])
 {
-    MEMSTAT_CONTEXT(EMemStatContextTypes::MSC_Texture, 0, "Creating Texture");
-    MEMSTAT_CONTEXT_FMT(EMemStatContextTypes::MSC_Texture, 0, "%s %ix%ix%i %08x", m_SrcName.c_str(), m_nWidth, m_nHeight, m_nMips, m_nFlags);
     SCOPED_RENDERER_ALLOCATION_NAME_HINT(GetSourceName());
 
     HRESULT hr;
 
     int32 nESRAMOffset = -1;
-
-#if defined(MAC)
-    if (!(m_nFlags & FT_FROMIMAGE) && (GetBlockDim(m_eTFDst) != Vec2i(1)))
-    {
-        m_bIsSRGB = true;
-    }
+#if defined(AZ_RESTRICTED_PLATFORM)
+#define AZ_RESTRICTED_SECTION D3DTEXTURE_CPP_SECTION_5
+#include AZ_RESTRICTED_FILE(D3DTexture_cpp, AZ_RESTRICTED_PLATFORM)
 #endif
 
     //if we have any device owned resources allocated, we must sync with render thread
@@ -2226,6 +2267,10 @@ bool CTexture::RT_CreateDeviceTexture(const byte* pData[6])
     if (m_nFlags & (FT_USAGE_RENDERTARGET | FT_USAGE_UNORDERED_ACCESS))
     {
         m_pRenderTargetData = new RenderTargetData();
+#if defined(AZ_RESTRICTED_PLATFORM)
+#define AZ_RESTRICTED_SECTION D3DTEXTURE_CPP_SECTION_6
+#include AZ_RESTRICTED_FILE(D3DTexture_cpp, AZ_RESTRICTED_PLATFORM)
+#endif
     }
 
     uint32 nArraySize = m_nArraySize;
@@ -2411,6 +2456,10 @@ bool CTexture::RT_CreateDeviceTexture(const byte* pData[6])
         }
         else
         {
+#if defined(AZ_RESTRICTED_PLATFORM)
+#define AZ_RESTRICTED_SECTION D3DTEXTURE_CPP_SECTION_7
+#include AZ_RESTRICTED_FILE(D3DTexture_cpp, AZ_RESTRICTED_PLATFORM)
+        #endif
 
             SAFE_RELEASE(m_pDevTexture);
             hr = pDevMan->Create2DTexture(m_SrcName, nWdt, nHgt, nMips, nArraySize, nUsage, m_cClearColor, D3DFmt, (D3DPOOL)0, &m_pDevTexture, &TI, false, nESRAMOffset);
@@ -2839,7 +2888,7 @@ bool CTexture::RT_CreateDeviceTexture(const byte* pData[6])
     // Notify that resource is dirty
     InvalidateDeviceResource(eDeviceResourceDirty | eDeviceResourceViewDirty);
 
-#if !defined(_RELEASE) && (defined(WIN32) || AZ_ENABLE_GNM_PA_DEBUG)
+#if defined(D3DTEXTURE_CPP_USE_PRIVATEDATA)
     if (m_pDevTexture)
     {
         m_pDevTexture->GetBaseTexture()->SetPrivateData(WKPDID_D3DDebugObjectName, m_SrcName.length(), m_SrcName.c_str());
@@ -2994,8 +3043,16 @@ void* CTexture::CreateDeviceResourceView(const SResourceView& rv)
     HRESULT hr = E_FAIL;
     void* pResult = NULL;
 
+#if defined(AZ_RESTRICTED_PLATFORM)
+#define AZ_RESTRICTED_SECTION D3DTEXTURE_CPP_SECTION_8
+#include AZ_RESTRICTED_FILE(D3DTexture_cpp, AZ_RESTRICTED_PLATFORM)
+#endif
+#if defined(AZ_RESTRICTED_SECTION_IMPLEMENTED)
+#undef AZ_RESTRICTED_SECTION_IMPLEMENTED
+#else
     // DX expects -1 for selecting all mip maps/slices. max count throws an exception
     const uint nSliceCount = rv.m_Desc.nSliceCount == SResourceView().m_Desc.nSliceCount ? (uint) - 1 : (uint)rv.m_Desc.nSliceCount;
+#endif
 
 
     D3DTexture* pTex = m_pDevTexture->Get2DTexture();
@@ -3014,7 +3071,7 @@ void* CTexture::CreateDeviceResourceView(const SResourceView& rv)
         hr = gcpRendD3D->GetDevice().CreateShaderResourceView(pTex, &srvDesc, &pSRV);
         pResult = pSRV;
 
-#if !defined(_RELEASE) && (defined(WIN32) || AZ_ENABLE_GNM_PA_DEBUG)
+#if defined(D3DTEXTURE_CPP_USE_PRIVATEDATA)
         if (pSRV)
         {
             AZStd::string srvName = AZStd::string::format("[SRV] %s", m_SrcName.c_str());
@@ -3036,7 +3093,7 @@ void* CTexture::CreateDeviceResourceView(const SResourceView& rv)
         hr = gcpRendD3D->GetDevice().CreateRenderTargetView(pTex, &rtvDesc, &pRTV);
         pResult = pRTV;
 
-#if !defined(_RELEASE) && (defined(WIN32) || AZ_ENABLE_GNM_PA_DEBUG)
+#if defined(D3DTEXTURE_CPP_USE_PRIVATEDATA)
             if (pRTV)
             {
                 AZStd::string rtvName = AZStd::string::format("[RTV] %s", m_SrcName.c_str());
@@ -3051,12 +3108,16 @@ void* CTexture::CreateDeviceResourceView(const SResourceView& rv)
         SetDepthStencilViewDesc(rv, m_eTT, pPixFormat->DeviceFormat, m_nArraySize, nSliceCount, dsvDesc);
 
         dsvDesc.Flags = rv.m_Desc.nFlags;
+#if defined(AZ_RESTRICTED_PLATFORM)
+#define AZ_RESTRICTED_SECTION D3DTEXTURE_CPP_SECTION_9
+#include AZ_RESTRICTED_FILE(D3DTexture_cpp, AZ_RESTRICTED_PLATFORM)
+#endif
 
         D3DDepthSurface* pDSV = NULL;
         hr = gcpRendD3D->GetDevice().CreateDepthStencilView(pTex, &dsvDesc, &pDSV);
         pResult = pDSV;
 
-#if !defined(_RELEASE) && (defined(WIN32) || AZ_ENABLE_GNM_PA_DEBUG)
+#if defined(D3DTEXTURE_CPP_USE_PRIVATEDATA)
             if (pDSV)
             {
                 AZStd::string dsvName = AZStd::string::format("[DSV] %s", m_SrcName.c_str());
@@ -3080,7 +3141,7 @@ void* CTexture::CreateDeviceResourceView(const SResourceView& rv)
         hr = gcpRendD3D->GetDevice().CreateUnorderedAccessView(pTex, &uavDesc, &pUAV);
 
         pResult = pUAV;
-#if !defined(_RELEASE) && (defined(WIN32) || AZ_ENABLE_GNM_PA_DEBUG)
+#if defined(D3DTEXTURE_CPP_USE_PRIVATEDATA)
             if (pUAV)
             {
                 AZStd::string uavName = AZStd::string::format("[UAV] %s", m_SrcName.c_str());
@@ -3669,6 +3730,20 @@ void CTexture::Apply(int nTUnit, int nState, int nTexMatSlot, int nSUnit, SResou
     uint32 nTSSel = Isel32(nState, (int32)m_nDefState);
     assert(nTSSel >= 0 && nTSSel < s_TexStates.size());
 
+#if defined(OPENGL)
+    // Due to driver issues on MALI gpus only point filtering is allowed for 32 bit float textures.
+    // If another filtering is used the sampler returns black.
+    if ((gcpRendD3D->m_Features | RFT_HW_ARM_MALI) && 
+        (m_eTFDst == eTF_R32F || m_eTFDst == eTF_R32G32B32A32F) &&
+        (s_TexStates[nTSSel].m_nMagFilter != FILTER_POINT || s_TexStates[nTSSel].m_nMinFilter != FILTER_POINT))
+    {
+        STexState newState = s_TexStates[nTSSel];
+        newState.SetFilterMode(FILTER_POINT);
+        nTSSel = CTexture::GetTexState(newState);
+        AZ_WarningOnce("Texture", false, "The current device only supports point filtering for full float textures. Forcing filtering for texture in slot %d", nTUnit);
+    }
+#endif // defined(OPENGL)
+
     STexStageInfo* TexStages = s_TexStages;
 
     CDeviceTexture* pDevTex = m_pDevTexture;
@@ -3769,7 +3844,16 @@ void CTexture::Apply(int nTUnit, int nState, int nTexMatSlot, int nSUnit, SResou
             {
                 // one mip per half a second
                 m_fCurrentMipBias -= 0.26667f * fCurrentMipBias;
-                gcpRendD3D->GetDeviceContext().SetResourceMinLOD(pDevTex->Get2DTexture(), m_fCurrentMipBias + (float)m_nMinMipVidUploaded);
+#if defined(CRY_USE_METAL)
+                //For metal, the lodminclamp is set once at initialization for the mtlsamplerstate. The mtlSamplerDescriptor's properties
+                //are only used during mtlSamplerState object creation; once created the behaviour of a sampler state object is
+                //fixed and cannot be changed. Hence we modify the descriptor with minlod and recreate the sampler state.
+                STexState* pTS = &s_TexStates[nTSSel];
+                D3DSamplerState* pSamp = (D3DSamplerState*)pTS->m_pDeviceState;
+                pSamp->SetLodMinClamp(m_fCurrentMipBias + static_cast<float>(m_nMinMipVidUploaded));
+#else
+                gcpRendD3D->GetDeviceContext().SetResourceMinLOD(pDevTex->Get2DTexture(), m_fCurrentMipBias + static_cast<float>(m_nMinMipVidUploaded));
+#endif
             }
             else if (fCurrentMipBias != 0.f)
             {
@@ -3884,7 +3968,7 @@ void CTexture::Apply(int nTUnit, int nState, int nTexMatSlot, int nSUnit, SResou
     }
 }
 
-void CTexture::UpdateTextureRegion(const byte* data, int nX, int nY, int nZ, int USize, int VSize, int ZSize, ETEX_Format eTFSrc)
+void CTexture::UpdateTextureRegion(const uint8_t* data, int nX, int nY, int nZ, int USize, int VSize, int ZSize, ETEX_Format eTFSrc)
 {
     gRenDev->m_pRT->RC_UpdateTextureRegion(this, data, nX, nY, nZ, USize, VSize, ZSize, eTFSrc);
 }
@@ -4306,7 +4390,6 @@ void CTexture::DrawSceneToCubeSide(Vec3& Pos, int tex_size, int side)
 
     CRenderer* r = gRenDev;
     CCamera prevCamera = r->GetCamera();
-    CCamera tmpCamera = prevCamera;
 
     I3DEngine* eng = gEnv->p3DEngine;
 
@@ -4315,8 +4398,16 @@ void CTexture::DrawSceneToCubeSide(Vec3& Pos, int tex_size, int side)
 
     Matrix33 matRot = Matrix33::CreateOrientation(vForward, vUp, DEG2RAD(sCubeVector[side][6]));
     Matrix34 mFinal = Matrix34(matRot, Pos);
-    tmpCamera.SetMatrix(mFinal);
-    tmpCamera.SetFrustum(tex_size, tex_size, 90.0f * gf_PI / 180.0f, prevCamera.GetNearPlane(), prevCamera.GetFarPlane()); //90.0f*gf_PI/180.0f
+
+    // Use current viewport camera's near/far to capture what is shown in the editor
+    const CCamera& viewCamera = gEnv->pSystem->GetViewCamera();
+    const float captureNear = viewCamera.GetNearPlane();
+    const float captureFar = viewCamera.GetFarPlane();
+    const float captureFOV = DEG2RAD(90.0f);
+
+    CCamera captureCamera;
+    captureCamera.SetMatrix(mFinal);
+    captureCamera.SetFrustum(tex_size, tex_size, captureFOV, captureNear, captureFar);
 
 #ifdef DO_RENDERLOG
     if (CRenderer::CV_r_log)
@@ -4325,7 +4416,7 @@ void CTexture::DrawSceneToCubeSide(Vec3& Pos, int tex_size, int side)
     }
 #endif
 
-    eng->RenderWorld(SHDF_CUBEMAPGEN | SHDF_ALLOWPOSTPROCESS | SHDF_ALLOWHDR | SHDF_ZPASS | SHDF_NOASYNC | SHDF_STREAM_SYNC, SRenderingPassInfo::CreateGeneralPassRenderingInfo(tmpCamera, (SRenderingPassInfo::DEFAULT_FLAGS | SRenderingPassInfo::CUBEMAP_GEN)), __FUNCTION__);
+    eng->RenderWorld(SHDF_CUBEMAPGEN | SHDF_ALLOWPOSTPROCESS | SHDF_ALLOWHDR | SHDF_ZPASS | SHDF_NOASYNC | SHDF_STREAM_SYNC, SRenderingPassInfo::CreateGeneralPassRenderingInfo(captureCamera, (SRenderingPassInfo::DEFAULT_FLAGS | SRenderingPassInfo::CUBEMAP_GEN)), __FUNCTION__);
 
 #ifdef DO_RENDERLOG
     if (CRenderer::CV_r_log)
@@ -4542,12 +4633,6 @@ void CTexture::GenerateSceneMap(ETEX_Format eTF)
             s_ptexModelHudBuffer->m_nHeight = nHeight;
             s_ptexModelHudBuffer->CreateRenderTarget(eTF_R8G8B8A8, Clr_Transparent);
         }
-    }
-
-    // Editor fix: it is possible at this point that resolution has changed outside of ChangeResolution and stereoR, stereoL have not been resized
-    if (gEnv->IsEditor())
-    {
-        gcpRendD3D->GetS3DRend().OnResolutionChanged();
     }
 }
 
@@ -4905,7 +4990,7 @@ void CD3D9Renderer::DrawAllDynTextures(const char* szFilter, const bool bLogName
     SDynTexture2::TextureSet2Itor itor;
     char name[256]; //, nm[256];
     cry_strcpy(name, szFilter);
-    strlwr(name);
+    azstrlwr(name, AZ_ARRAY_SIZE(name));
     TArray<CTexture*> UsedRT;
     int nMaxCount = CV_r_ShowDynTexturesMaxCount;
 
@@ -4954,7 +5039,7 @@ void CD3D9Renderer::DrawAllDynTextures(const char* szFilter, const bool bLogName
             {
                 char nameBuffer[128];
                 cry_strcpy(nameBuffer, tp->GetName());
-                strlwr(nameBuffer);
+                azstrlwr(nameBuffer, AZ_ARRAY_SIZE(nameBuffer));
                 if (CryStringUtils::MatchWildcard(nameBuffer, name))
                 {
                     UsedRT.AddElem(tp);
@@ -5060,6 +5145,10 @@ void CTexture::ReleaseSystemTargets()
     SAFE_RELEASE_FORCE(s_ptexAOColorBleed);
     SAFE_RELEASE_FORCE(s_ptexSceneDiffuse);
     SAFE_RELEASE_FORCE(s_ptexSceneSpecular);
+#if defined(AZ_RESTRICTED_PLATFORM)
+#define AZ_RESTRICTED_SECTION D3DTEXTURE_CPP_SECTION_10
+#include AZ_RESTRICTED_FILE(D3DTexture_cpp, AZ_RESTRICTED_PLATFORM)
+#endif
     SAFE_RELEASE_FORCE(s_ptexSceneDiffuseAccMap);
     SAFE_RELEASE_FORCE(s_ptexSceneSpecularAccMap);
     SAFE_RELEASE_FORCE(s_ptexBackBuffer);
@@ -5084,7 +5173,7 @@ void CTexture::CreateSystemTargets()
 {
     if (!gcpRendD3D->m_bSystemTargetsInit)
     {
-        ScopedSwitchToGlobalHeap useGlobalHeap;
+        
 
         gcpRendD3D->m_bSystemTargetsInit = 1;
 
@@ -5127,6 +5216,10 @@ void CTexture::CopySliceChain(CDeviceTexture* const pDevTexture, int ownerMips, 
 {
     assert(pSrcDevTex && pDevTexture);
 
+#if defined(AZ_RESTRICTED_PLATFORM)
+#define AZ_RESTRICTED_SECTION D3DTEXTURE_CPP_SECTION_11
+#include AZ_RESTRICTED_FILE(D3DTexture_cpp, AZ_RESTRICTED_PLATFORM)
+#endif
 
     D3DBaseTexture* pDstResource = pDevTexture->GetBaseTexture();
     D3DBaseTexture* pSrcResource = pSrcDevTex->GetBaseTexture();
@@ -5142,6 +5235,10 @@ void CTexture::CopySliceChain(CDeviceTexture* const pDevTexture, int ownerMips, 
     }
 #endif
 
+#if defined(AZ_RESTRICTED_PLATFORM)
+#define AZ_RESTRICTED_SECTION D3DTEXTURE_CPP_SECTION_12
+#include AZ_RESTRICTED_FILE(D3DTexture_cpp, AZ_RESTRICTED_PLATFORM)
+#endif
     assert(nSrcMip >= 0 && nDstMip >= 0);
     for (int i = 0; i < nNumMips; ++i)
     {

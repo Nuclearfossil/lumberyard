@@ -11,8 +11,6 @@
 */
 // Original file Copyright Crytek GMBH or its affiliates, used under license.
 
-#ifndef CRYINCLUDE_CRYSYSTEM_ZIPENCRYPT_H
-#define CRYINCLUDE_CRYSYSTEM_ZIPENCRYPT_H
 #pragma once
 
 
@@ -20,15 +18,7 @@
 #include "ZipDirStructures.h"
 
 
-#ifdef INCLUDE_LIBTOMCRYPT
-    #define USE_LTM
-    #define LTM_DESC
-    #include <tomcrypt.h>
-    #undef byte // tomcrypt defines a byte macro which conflicts with out byte data type
-    #define STREAM_CIPHER_NAME "twofish"
-extern prng_state g_yarrow_prng_state;
-extern rsa_key g_rsa_key_public_for_sign;
-#endif //INCLUDE_LIBTOMCRYPT
+#include "CryTomcrypt.h"
 
 
 namespace ZipEncrypt
@@ -39,8 +29,8 @@ namespace ZipEncrypt
     void FinishStreamCipher(symmetric_CTR* pCTR);
     bool DecryptBufferWithStreamCipher(unsigned char* inBuffer, unsigned char* outBuffer, size_t bufferSize, symmetric_CTR* pCTR);
     bool DecryptBufferWithStreamCipher(unsigned char* inBuffer, size_t bufferSize, unsigned char key[16], unsigned char IV[16]);
-    CHEAT_PROTECTION_EXPORT int  GetEncryptionKeyIndex(const ZipDir::FileEntry* pFileEntry);
-    CHEAT_PROTECTION_EXPORT void GetEncryptionInitialVector(const ZipDir::FileEntry * pFileEntry, unsigned char IV[16]);
+    int  GetEncryptionKeyIndex(const ZipDir::FileEntry* pFileEntry);
+    void GetEncryptionInitialVector(const ZipDir::FileEntry * pFileEntry, unsigned char IV[16]);
 
     bool RSA_VerifyData(void* inBuffer, int sizeIn, unsigned char* signedHash, int signedHashSize, rsa_key& publicKey);
     bool RSA_VerifyData(const unsigned char** inBuffers, unsigned int* sizesIn, const int numBuffers, unsigned char* signedHash, int signedHashSize, rsa_key& publicKey);
@@ -58,4 +48,3 @@ namespace ZipEncrypt
 #endif  //INCLUDE_LIBTOMCRYPT
 }
 
-#endif // CRYINCLUDE_CRYSYSTEM_ZIPENCRYPT_H

@@ -20,6 +20,12 @@
 #include "StringFunc.h"
 
 #if !defined(AZ_PLATFORM_WINDOWS)
+#if defined(AZ_RESTRICTED_PLATFORM)
+#include AZ_RESTRICTED_FILE(StringFunc_cpp, AZ_RESTRICTED_PLATFORM)
+#endif
+#if defined(AZ_RESTRICTED_SECTION_IMPLEMENTED)
+#undef AZ_RESTRICTED_SECTION_IMPLEMENTED
+#else
 
 //Have to declare this typedef for Android & Linux to minimise changes elsewhere in this file
 #if defined(AZ_PLATFORM_ANDROID) || defined(AZ_PLATFORM_LINUX)
@@ -148,6 +154,7 @@ errno_t _splitpath_s (const char* path,
 
     return 0;
 }
+#endif
 #endif
 
 // Some platforms define NAME_MAX but Windows doesn't and the AZ headers provide no equivalent
@@ -579,6 +586,11 @@ namespace AzFramework
                                 RKeep(inout, pos, true);
                             }
                         }
+                        else
+                        {
+                            // strip first
+                            inout.erase(0, 1);
+                        }
                     }
 
                     if (bStripEnding)
@@ -590,6 +602,15 @@ namespace AzFramework
                             {
                                 bSomethingWasStripped = true;
                                 LKeep(inout, pos, true);
+                            }
+                        }
+                        else
+                        {
+                            // strip last
+                            const size_t length = inout.length();
+                            if (length > 0)
+                            {
+                                inout.erase(length - 1, 1);
                             }
                         }
                     }
@@ -611,6 +632,11 @@ namespace AzFramework
                                 RKeep(inout, pos, true);
                             }
                         }
+                        else
+                        {
+                            // strip first
+                            inout.erase(0, 1);
+                        }
                     }
 
                     if (bStripEnding)
@@ -622,6 +648,15 @@ namespace AzFramework
                             {
                                 bSomethingWasStripped = true;
                                 LKeep(inout, pos, true);
+                            }
+                        }
+                        else
+                        {
+                            // strip last
+                            const size_t length = inout.length();
+                            if (length > 0)
+                            {
+                                inout.erase(length - 1, 1);
                             }
                         }
                     }
@@ -3957,23 +3992,27 @@ namespace AzFramework
 
             bool GetDrive(const char* in, AZStd::string& out)
             {
-                out.clear();
                 if (!in)
                 {
+                    out.clear();
                     return false;
                 }
 
                 if (!strlen(in))
                 {
+                    out.clear();
                     return false;
                 }
 
+                // If caller used the same AZStd:string for in and out parameters
+                // copy it to another variable and use its memory for in.
                 AZStd::string tempIn;
                 if (in == out.c_str())
                 {
                     tempIn = in;
                     in = tempIn.c_str();
                 }
+                out.clear();
 
     #if AZ_TRAIT_OS_USE_WINDOWS_FILE_PATHS
 
@@ -4019,7 +4058,11 @@ namespace AzFramework
                     return true;
                 }
     #else
-                AZ_Assert(false, "Not implemented on this platform!");
+                // on other platforms, its got a root if it starts with '/'
+                if (in[0] == '/')
+                {
+                    return true;
+                }
     #endif
                 return false;
             }

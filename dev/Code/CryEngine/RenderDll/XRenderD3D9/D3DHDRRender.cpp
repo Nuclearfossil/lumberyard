@@ -1177,7 +1177,7 @@ void CHDRPostProcess::ProcessLensOptics()
             gcpRendD3D->FX_SetColorDontCareActions(0, false, false);
             gcpRendD3D->FX_ClearTarget(pLensOpticsComposite, Clr_Transparent);            
 
-            gcpRendD3D->m_RP.m_PersFlags2 |= RBPF2_NOPOSTAA | RBPF2_LENS_OPTICS_COMPOSITE;
+            gcpRendD3D->m_RP.m_PersFlags2 |= RBPF2_NOPOSTAA;
 
             GetUtils().Log(" +++ Begin lens-optics scene +++ \n");
             gcpRendD3D->FX_ProcessRenderList(EFSLIST_LENSOPTICS, FB_GENERAL);
@@ -1243,7 +1243,7 @@ void CHDRPostProcess::ToneMapping()
     bool bColorGrading = false;
 
     SColorGradingMergeParams pMergeParams;
-    if (CRenderer::CV_r_colorgrading && CRenderer::CV_r_colorgrading_charts && CRenderer::CV_r_ToneMapTechnique== static_cast<int>(ToneMapOperators::FilmicCurveUC2)) //color grading is only supported for Uncharted2 filmic curve
+    if (CRenderer::CV_r_colorgrading && CRenderer::CV_r_colorgrading_charts)
     {
         CColorGrading* pColorGrad = 0;
         if (!PostEffectMgr()->GetEffects().empty())
@@ -1767,9 +1767,9 @@ void CHDRPostProcess::DrawDebugViews()
         char str[256];
         SDrawTextInfo ti;
         ti.color[1] = 0;
-        sprintf(str, "Average Luminance (cd/m2): %.2f", fLuminance * RENDERER_LIGHT_UNIT_SCALE);
+        azsprintf(str, "Average Luminance (cd/m2): %.2f", fLuminance * RENDERER_LIGHT_UNIT_SCALE);
         rd->Draw2dText(5, 35, str, ti);
-        sprintf(str, "Estimated Illuminance (lux): %.1f", fIlluminance * RENDERER_LIGHT_UNIT_SCALE);
+        azsprintf(str, "Estimated Illuminance (lux): %.1f", fIlluminance * RENDERER_LIGHT_UNIT_SCALE);
         rd->Draw2dText(5, 55, str, ti);
 
         Vec4 vHDRSetupParams[5];
@@ -1781,7 +1781,7 @@ void CHDRPostProcess::DrawDebugViews()
             float sceneKey = 1.03f - 2.0f / (2.0f + log(fLuminance + 1.0f) / log(2.0f));
             float exposure = clamp_tpl<float>(sceneKey / fLuminance, vHDRSetupParams[4].y, vHDRSetupParams[4].z);
 
-            sprintf(str, "Exposure: %.2f  SceneKey: %.2f", exposure, sceneKey);
+            azsprintf(str, "Exposure: %.2f  SceneKey: %.2f", exposure, sceneKey);
             rd->Draw2dText(5, 75, str, ti);
         }
         else
@@ -1791,7 +1791,7 @@ void CHDRPostProcess::DrawDebugViews()
             float autoCompensation = (clamp_tpl<float>(sceneKey, 0.1f, 5.2f) - 3.0f) / 2.0f * vHDRSetupParams[3].z;
             float finalExposure = clamp_tpl<float>(exposure - autoCompensation, vHDRSetupParams[3].x, vHDRSetupParams[3].y);
 
-            sprintf(str, "Measured EV: %.1f  Auto-EC: %.1f  Final EV: %.1f", exposure, autoCompensation, finalExposure);
+            azsprintf(str, "Measured EV: %.1f  Auto-EC: %.1f  Final EV: %.1f", exposure, autoCompensation, finalExposure);
             rd->Draw2dText(5, 75, str, ti);
         }
 
@@ -1940,7 +1940,7 @@ void CHDRPostProcess::End()
 
     PostProcessUtils().SetFillModeSolid(false);
 
-    // (re-set back-buffer): due to lazy RT updates/setting there's strong possibility we run into problems on x360 when we try to resolve from edram with no RT set // ACCEPTED_USE
+    // (re-set back-buffer): if the platform does lazy RT updates/setting there's strong possibility we run into problems when we try to resolve with no RT set
     gcpRendD3D->FX_SetActiveRenderTargets();
 }
 
@@ -1955,7 +1955,7 @@ void CHDRPostProcess::Render()
     {
         CRY_ASSERT(gcpRendD3D->FX_GetCurrentRenderTarget(0) == CTexture::s_ptexHDRTarget);
 
-        gcpRendD3D->FX_SetActiveRenderTargets(); // Called explicitly to work around RT stack problems on 360
+        gcpRendD3D->FX_SetActiveRenderTargets(); // Called explicitly to work around RT stack problems on deprecated platform
         gcpRendD3D->RT_UnbindTMUs();// Avoid d3d error due to potential rtv still bound as shader input.
         gcpRendD3D->FX_PopRenderTarget(0);
         gcpRendD3D->EF_ClearTargetsLater(0);

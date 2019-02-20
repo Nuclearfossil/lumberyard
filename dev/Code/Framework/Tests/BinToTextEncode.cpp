@@ -10,7 +10,7 @@
 *
 */
 
-#include "TestTypes.h"
+#include <Tests/TestTypes.h>
 
 #include <AzCore/Component/ComponentApplication.h>
 #include <AzCore/Memory/PoolAllocator.h>
@@ -29,29 +29,35 @@ namespace UnitTest
     public:
         Base64Test()
             : AllocatorsFixture(15, false)
+            , m_systemEntity(nullptr)
         {
-            AllocatorInstance<PoolAllocator>::Create();
-            AllocatorInstance<ThreadPoolAllocator>::Create();
-        }
-
-        ~Base64Test()
-        {
-            AllocatorInstance<PoolAllocator>::Destroy();
-            AllocatorInstance<ThreadPoolAllocator>::Destroy();
         }
 
         void SetUp() override
         {
+            AllocatorsFixture::SetUp();
+            AllocatorInstance<PoolAllocator>::Create();
+            AllocatorInstance<ThreadPoolAllocator>::Create();
             ComponentApplication::Descriptor desc;
             desc.m_useExistingAllocator = true;
-            m_app.Create(desc);
+            m_systemEntity = m_app.Create(desc);
         }
 
         void TearDown() override
         {
+            delete m_systemEntity;
             m_app.Destroy();
+            AllocatorInstance<PoolAllocator>::Destroy();
+            AllocatorInstance<ThreadPoolAllocator>::Destroy();
+            AllocatorsFixture::TearDown();
         }
 
+        virtual ~Base64Test()
+        {
+            
+        }
+
+        AZ::Entity* m_systemEntity;
         ComponentApplication m_app;
     };
 

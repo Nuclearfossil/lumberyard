@@ -15,7 +15,6 @@
 
 //
 #include <MCore/Source/StandardHeaders.h>
-#include <MCore/Source/UnicodeString.h>
 #include "../EMStudioConfig.h"
 #include <EMotionFX/Rendering/Common/Camera.h>
 #include <EMotionFX/Rendering/Common/TransformationManipulator.h>
@@ -90,6 +89,8 @@ namespace EMStudio
             : public EMotionFX::EventHandler
         {
         public:
+            AZ_CLASS_ALLOCATOR_DECL
+
             EventHandler(RenderWidget* widget)
                 : EMotionFX::EventHandler() { mWidget = widget; }
             ~EventHandler() {}
@@ -133,7 +134,7 @@ namespace EMStudio
         MCORE_INLINE MCommon::Camera* GetCamera() const                                                     { return mCamera; }
         MCORE_INLINE CameraMode GetCameraMode() const                                                       { return mCameraMode; }
         MCORE_INLINE void SetSkipFollowCalcs(bool skipFollowCalcs)                                          { mSkipFollowCalcs = skipFollowCalcs; }
-        void ViewCloseup(const MCore::AABB& aabb, float flightTime, uint32 viewCloseupWaiting = 5);
+        void ViewCloseup(bool selectedInstancesOnly, float flightTime, uint32 viewCloseupWaiting = 5);
         void SwitchCamera(CameraMode mode);
 
         // render bugger dimensions
@@ -179,7 +180,7 @@ namespace EMStudio
 
         // used for closeup camera flights
         uint32                                  mViewCloseupWaiting;
-        MCore::AABB                             mViewCloseupAABB;
+        bool                                    mViewClosupSelectedInstancesOnly;
         float                                   mViewCloseupFlightTime;
 
         // manipulator helper data

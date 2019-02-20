@@ -105,6 +105,8 @@ public:
 public:
     virtual ~CRenderViewport();
 
+    Q_INVOKABLE void InjectFakeMouseMove(int deltaX, int deltaY, Qt::MouseButtons buttons);
+
 public:
     virtual void Update();
 
@@ -140,6 +142,7 @@ public:
     virtual bool IsBoundsVisible(const AABB& box) const;
     virtual void CenterOnSelection();
     virtual void CenterOnAABB(const AABB& aabb);
+    void CenterOnSliceInstance() override;
 
     void focusOutEvent(QFocusEvent* event) override;
     void keyPressEvent(QKeyEvent* event) override;
@@ -156,15 +159,16 @@ public:
     bool IsSelectedCamera() const;
     void SetCameraObject(CBaseObject* cameraObject);
     void SetComponentCamera(const AZ::EntityId& entityId);
-    void SetEntityAsCamera(const AZ::EntityId& entityId);
+    void SetEntityAsCamera(const AZ::EntityId& entityId, bool lockCameraMovement = false);
     void SetFirstComponentCamera();
-    void SetViewEntity(const AZ::EntityId& cameraEntityId);
+    void SetViewEntity(const AZ::EntityId& cameraEntityId, bool lockCameraMovement = false);
     void PostCameraSet();
     // This switches the active camera to the next one in the list of (default, all custom cams).
     void CycleCamera();
 
     /// Camera::CameraEditorRequests::Handler
-    void SetViewFromEntityPerspective(const AZ::EntityId& entityId) override { SetEntityAsCamera(entityId); }
+    void SetViewFromEntityPerspective(const AZ::EntityId& entityId) override;
+    void SetViewAndMovementLockFromEntityPerspective(const AZ::EntityId& entityId, bool lockCameraMovement) override;
     AZ::EntityId GetCurrentViewEntityId() { return m_viewEntityId; }
 
     /// AzToolsFramework::EditorEntityContextNotificationBus::Handler
@@ -565,6 +569,8 @@ private:
     bool IsRenderingDisabled() const;
     MousePick BuildMousePickInternal(const QPoint& point) const;
 
+    void RestoreViewportAfterGameMode();
+
     double WidgetToViewportFactor() const
     {
 #if defined(AZ_PLATFORM_WINDOWS)
@@ -589,6 +595,9 @@ private:
     bool m_freezeViewportInput = false;
 
     AZStd::shared_ptr<AzToolsFramework::ManipulatorManager> m_manipulatorManager;
+
+    // Used to prevent circular set camera events
+    bool m_ignoreSetViewFromEntityPerspective = false;
 };
 
 /////////////////////////////////////////////////////////////////////////////

@@ -74,7 +74,7 @@ namespace CloudGemTextToSpeech
             if (serializeContext)
             {
                 // we must include any fields we want to expose to the editor or lua in the serialize context
-                serializeContext->Class<TextToSpeech>()
+                serializeContext->Class<TextToSpeech, AZ::Component>()
                     ->Version(1);
 
                 AZ::EditContext* editContext = serializeContext->GetEditContext();
@@ -154,7 +154,7 @@ namespace CloudGemTextToSpeech
         AZStd::string GetAliasedUserCachePath(const AZStd::string& hash) const;
 
         void ConvertTextToSpeech(const AZStd::string& voice, const AZStd::string& text, const AZStd::string& speechMarks);
-        AZStd::string FindCachedVoiceFileExtension(const AZStd::string& dir, const AZStd::string& hash) const;
+        bool MainCacheFilesExist(const AZStd::string & hash, const AZStd::string & speechMarks, AZStd::string& voiceFile);
 
         class TTSConversionJob : public AZ::Job
         {

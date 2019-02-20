@@ -11,6 +11,9 @@
 */
 #include "IResourceCompilerHelper.h"
 
+// DO NOT USE AZSTD.
+
+#include <AzCore/std/string/string_view.h>
 #include <string> // std string used here.
 #include <memory>
 
@@ -63,42 +66,28 @@ namespace RCPathUtil
 
 
     //! Replace extension for given file.
-    std::string RemoveExtension(const char* filepath)
+    AZStd::string_view RemoveExtension(AZStd::string_view filePath)
     {
-        std::string filepathstr = filepath;
-        const char* str = filepathstr.c_str();
-        for (const char* p = str + filepathstr.length() - 1; p >= str; --p)
-        {
-            switch (*p)
-            {
-            case ':':
-            case '/':
-            case '\\':
-                // we've reached a path separator - it means there's no extension in this name
-                return filepathstr;
-            case '.':
-                // there's an extension in this file name
-                filepathstr = filepathstr.substr(0, p - str);
-                return filepathstr;
-            }
-        }
-        // it seems the file name is a pure name, without path or extension
-        return filepathstr;
+        size_t extPos = filePath.find_last_of(".");
+        extPos = extPos == 0 ? AZStd::string_view::npos : extPos;
+        return filePath.substr(0, extPos);
     }
 
     std::string ReplaceExtension(const char* filepath, const char* ext)
     {
-        std::string str = filepath;
         if (ext != 0)
         {
-            str = RemoveExtension(str.c_str());
+            AZStd::string_view filepathNoExt = RemoveExtension(filepath);
+            std::string str(filepathNoExt.data(), filepathNoExt.size());
             if (ext[0] != 0 && ext[0] != '.')
             {
                 str += ".";
             }
             str += ext;
+
+            return str;
         }
-        return str;
+        return std::string(filepath);
     }
 
     std::string GetPath(const char* filepath)
@@ -151,12 +140,8 @@ IResourceCompilerHelper::ERcCallResult IResourceCompilerHelper::ConvertResourceC
 
     case   eRcExitCode_FatalError:
         return eRcCallResult_error;
-
     case   eRcExitCode_Crash:
         return eRcCallResult_crash;
-
-    case   eRcExitCode_Pending:
-        return eRcCallResult_queued;
     }
     return eRcCallResult_error;
 }
@@ -175,8 +160,6 @@ const char* IResourceCompilerHelper::GetCallResultDescription(IResourceCompilerH
         return "ResourceCompiler exited with an error.";
     case eRcCallResult_crash:
         return "ResourceCompiler crashed! Please report this. Include source asset and this log in the report.";
-    case eRcCallResult_queued:
-        return "ResourceCompiler added to the background-processing queue.";
     default:
         return "Unexpected failure in ResultCompilerHelper.";
     }

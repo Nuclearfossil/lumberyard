@@ -18,8 +18,6 @@
 #define CRYINCLUDE_CRYENGINE_RENDERDLL_COMMON_SHADERS_PARSERBIN_H
 #pragma once
 
-#include <CryEngineAPI.h>
-
 #include "ShaderCache.h"
 #include "ShaderAllocator.h"
 
@@ -565,7 +563,11 @@ enum EToken
     eT__LT_3_TYPE,
     eT__TT_TEXCOORD_MATRIX,
     eT__TT_TEXCOORD_PROJ,
-    eT__TT_TEXCOORD_GEN_OBJECT_LINEAR,
+    eT__TT_TEXCOORD_GEN_OBJECT_LINEAR_DIFFUSE,
+    eT__TT_TEXCOORD_GEN_OBJECT_LINEAR_EMITTANCE,
+    eT__TT_TEXCOORD_GEN_OBJECT_LINEAR_EMITTANCE_MULT,
+    eT__TT_TEXCOORD_GEN_OBJECT_LINEAR_DETAIL,
+    eT__TT_TEXCOORD_GEN_OBJECT_LINEAR_CUSTOM,
     eT__VT_TYPE,
     eT__VT_TYPE_MODIF,
     eT__VT_BEND,
@@ -699,6 +701,8 @@ enum EToken
     eT_FIXED_POINT,
     eT_GLES3_0,
 
+    eT_LLVM_DIRECTX_SHADER_COMPILER,
+
     eT_Load,
     eT_Sample,
     eT_Gather,
@@ -750,7 +754,7 @@ struct SMacroBinFX
 
 class CParserBin;
 
-typedef std::map<uint32, SMacroBinFX> FXMacroBin;
+typedef AZStd::unordered_map<uint32, SMacroBinFX, AZStd::hash<uint32>, AZStd::equal_to<uint32>, AZ::StdLegacyAllocator> FXMacroBin;
 typedef FXMacroBin::iterator FXMacroBinItor;
 
 struct SParserFrame
@@ -918,7 +922,7 @@ public:
         if (szStr[0] == '0' && szStr[1] == 'x')
         {
             int i = 0;
-            int res = sscanf(&szStr[2], "%x", &i);
+            int res = azsscanf(&szStr[2], "%x", &i);
             assert(res != 0);
             return i;
         }
@@ -996,6 +1000,11 @@ public:
     static uint32 fxToken(const char* szToken, bool* bKey = NULL);
     static uint32 fxTokenKey(const char* szToken, EToken eT = eT_unknown);
     static uint32 GetCRC32(const char* szStr);
+    //! Gets the next token from the buffer
+    //! @param buf The buffer that is being parsed
+    //! @param com Buffer into which the complete token is written
+    //! @param bKey Set to true if the token is a 'key' token, false otherwise. Key tokens are enumerated by EToken, with corresponding string values set int CParserBin::Init().
+    //! @return Returns the enum of the key token if bKey is true, eT_unknown otherwise
     static uint32 NextToken(char*& buf, char* com, bool& bKey);
     static void Init();
     static void RemovePlatformDefines();
@@ -1011,8 +1020,8 @@ public:
     static void SetupForGMEM(int gmemPath, int& curMacroNum);
     static void SetupForDurango(); // ACCEPTED_USE
     static void SetupFeatureDefines();
+    static void SetupShadersCacheAndFilter();
     static CCryNameTSCRC GetPlatformSpecName(CCryNameTSCRC orgName);
-    static const char* GetPlatformShaderlistName();
 
     static bool PlatformSupportsConstantBuffers(){return (CParserBin::m_nPlatform == SF_D3D11 || CParserBin::m_nPlatform == SF_ORBIS || CParserBin::m_nPlatform == SF_DURANGO || CParserBin::m_nPlatform == SF_GL4 || CParserBin::m_nPlatform == SF_GLES3 || CParserBin::m_nPlatform == SF_METAL); }; // ACCEPTED_USE
     static bool PlatformSupportsGeometryShaders(){return (CParserBin::m_nPlatform == SF_D3D11 || CParserBin::m_nPlatform == SF_ORBIS || CParserBin::m_nPlatform == SF_DURANGO || CParserBin::m_nPlatform == SF_GL4); } // ACCEPTED_USE

@@ -25,6 +25,7 @@
 #include <QApplication>
 #include <AzToolsFramework/Entity/EditorEntityContextBus.h>
 #include <AzToolsFramework/Thumbnails/ThumbnailerBus.h>
+#include <AzCore/std/string/string.h>
 
 class QMenu;
 
@@ -47,6 +48,7 @@ class CEditorFileMonitor;
 class AzAssetWindow;
 class AzAssetBrowserRequestHandler;
 class AssetEditorRequestsHandler;
+class CAlembicCompiler;
 
 namespace Editor
 {
@@ -114,6 +116,7 @@ public:
     IGame*      GetGame();
     I3DEngine*  Get3DEngine();
     IRenderer*  GetRenderer();
+    void WriteToConsole(const char* string) { CLogFile::WriteLine(string); };
     void WriteToConsole(const QString& string) { CLogFile::WriteLine(string); };
     // Change the message in the status bar
     void SetStatusText(const QString& pszString);
@@ -322,6 +325,7 @@ public:
     void RecordUndo(IUndoObject* obj);
     bool FlushUndo(bool isShowMessage = false);
     bool ClearLastUndoSteps(int steps);
+    bool ClearRedoStack();
     //! Retrieve current animation context.
     CAnimationContext* GetAnimation();
     CTrackViewSequenceManager* GetSequenceManager() override;
@@ -388,7 +392,10 @@ public:
 
     virtual bool ToProjectConfigurator(const QString& msg, const QString& caption, const QString& location) override;
 
+#ifdef DEPRECATED_QML_SUPPORT
     virtual QQmlEngine* GetQMLEngine() const;
+#endif // #ifdef DEPRECATED_QML_SUPPORT
+
     void UnloadPlugins(bool shuttingDown = false) override;
     void LoadPlugins() override;
 
@@ -405,7 +412,7 @@ protected:
     // EditorEntityContextNotificationBus implementation
     void OnStartPlayInEditor() override;
     //////////////////////////////////////////////////////////////////////////
-
+    AZStd::string LoadProjectIdFromProjectData();
     void InitMetrics();
 
     void DetectVersion();
@@ -473,6 +480,7 @@ protected:
     CToolBoxManager* m_pToolBoxManager;
     CEntityPrototypeManager* m_pEntityManager;
     CMaterialManager* m_pMaterialManager;
+    CAlembicCompiler* m_pAlembicCompiler;
     IEditorParticleManager* m_particleManager;
     IEditorParticleUtils* m_particleEditorUtils;
     CMusicManager* m_pMusicManager;

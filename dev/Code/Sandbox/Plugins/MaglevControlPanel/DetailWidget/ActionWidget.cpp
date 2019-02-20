@@ -25,7 +25,8 @@
 
 #include <DetailWidget/ActionWidget.moc>
 
-ActionWidget::ActionWidget()
+ActionWidget::ActionWidget(QWidget* parent)
+    : QFrame(parent)
 {
     CreateUI();
 
@@ -54,7 +55,7 @@ void ActionWidget::CreateUI()
 
     // heading
 
-    m_headingWidget = new HeadingWidget {};
+    m_headingWidget = new HeadingWidget {this};
     m_headingWidget->HideRefresh();
     rootLayout->addWidget(m_headingWidget);
 
@@ -146,12 +147,12 @@ void ActionWidget::AddLearnMoreLink(const QString& text, const QString& url)
 
 void ActionWidget::AddCloudCanvasDocumentationLink()
 {
-    AddLearnMoreLink("Cloud Canvas documentation", "http://docs.aws.amazon.com/lumberyard/latest/developerguide/cloud-canvas-intro.html");
+    AddLearnMoreLink("Cloud Canvas documentation", "http://docs.aws.amazon.com/console/lumberyard/cloudcanvas/introduction");
 }
 
 void ActionWidget::AddCloudCanvasTutorialsLink()
 {
-    AddLearnMoreLink("Cloud Canvas tutorial", "http://docs.aws.amazon.com/lumberyard/latest/developerguide/cloud-canvas-tutorial.html");
+    AddLearnMoreLink("Cloud Canvas tutorial", "http://docs.aws.amazon.com/console/lumberyard/cloudcanvas/tutorial");
 }
 
 void ActionWidget::AddCloudFormationDocumentationLink()

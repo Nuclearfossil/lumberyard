@@ -127,11 +127,11 @@ public: // member functions
 
     //! recursively find descendant elements matching a predicate
     //! \param result, any matching elements will be added to this array
-    virtual void FindDescendantElements(std::function<bool(const AZ::Entity*)> predicate, LyShine::EntityArray& result) = 0;
+    virtual void FindDescendantElements(AZStd::function<bool(const AZ::Entity*)> predicate, LyShine::EntityArray& result) = 0;
 
     //! recursively visit descendant elements and call the given function on them
     //! The function is called first on the element and then on its children
-    virtual void CallOnDescendantElements(std::function<void(const AZ::EntityId)> callFunction) = 0;
+    virtual void CallOnDescendantElements(AZStd::function<void(const AZ::EntityId)> callFunction) = 0;
 
     //! Return whether a given element is an ancestor of this element
     virtual bool IsAncestor(AZ::EntityId id) = 0;
@@ -139,6 +139,11 @@ public: // member functions
     //! Enabled/disabled
     virtual bool IsEnabled() = 0;
     virtual void SetIsEnabled(bool isEnabled) = 0;
+
+    //! This can be used to disable the render without disabling the update/interaction.
+    //! This is used internally by components that temporarily disable rendering of other elements (though they preserve the existing value).
+    virtual bool IsRenderEnabled() = 0;
+    virtual void SetIsRenderEnabled(bool isRenderEnabled) = 0;
 
 public: // static member data
 

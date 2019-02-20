@@ -88,7 +88,7 @@ struct SParamCacheInfo
 
 struct SShaderBin
 {
-    typedef std::vector<SParamCacheInfo, STLShaderAllocator<SParamCacheInfo> > ParamsCacheVec;
+    typedef AZStd::vector<SParamCacheInfo, AZ::StdLegacyAllocator> ParamsCacheVec;
     static SShaderBin s_Root;
     static uint32 s_nCache;
     static uint32 s_nMaxFXBinCache;
@@ -152,7 +152,7 @@ struct SShaderBin
         if (name[0])
         {
             m_szName = (char*) g_shaderBucketAllocator.allocate(strlen(name) + 1);
-            strcpy(m_szName, name);
+            azstrcpy(m_szName, strlen(name) + 1, name);
         }
     }
 

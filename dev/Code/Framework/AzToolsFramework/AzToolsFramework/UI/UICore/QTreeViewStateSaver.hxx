@@ -10,19 +10,14 @@
 *
 */
 
-#ifndef QTreeViewStateSaver_inc
-#define QTreeViewStateSaver_inc
+#pragma once
 
 #include <AzCore/base.h>
 #include <AzCore/std/smart_ptr/intrusive_ptr.h>
-#include <AzCore/Memory/SystemAllocator.h>
-#include <AzCore/std/functional.h>
 
 #include <QObject>
 #include <QPointer>
 #include <QTreeView>
-
-#pragma once
 
 class QModelIndex;
 class QByteArray;
@@ -36,14 +31,66 @@ namespace AZ
 namespace AzToolsFramework
 {
     class QTreeViewStateSaverData;
+    class QTreeViewStateSaver;
 
+    // Special class to wrap saving and restoring tree state
+    // Wouldn't be necessary if there was a way to listen for changes to QTreeView's
+    // data model and selection model.
+    // Use this instead of QTreeView to handle most of the details of saving and loading
+    // tree view state.
+    class QTreeViewWithStateSaving
+        : public QTreeView
+    {
+        Q_OBJECT
+
+    public:
+        explicit QTreeViewWithStateSaving(QWidget* parent = nullptr);
+        ~QTreeViewWithStateSaving() override;
+
+        // One of the Initialize methods must be called before tree view state can be saved or loaded
+        void InitializeTreeViewSaving(AZ::u32 storageID);
+
+        void CaptureTreeViewSnapshot() const;
+        void ApplyTreeViewSnapshot() const;
+
+        void WriteTreeViewStateTo(QSet<QString>& target);
+        void ReadTreeViewStateFrom(QSet<QString>& source);
+
+        void PauseTreeViewSaving();
+        void UnpauseTreeViewSaving();
+
+        bool IsTreeViewSavingReady() const { return m_treeStateSaver != nullptr; }
+
+        // These are overridden so that this class knows when the models change
+        void setModel(QAbstractItemModel* model) override;
+        void setSelectionModel(QItemSelectionModel* selectionModel) override;
+
+        static void Reflect(AZ::ReflectContext* context);
+
+    protected:
+        void SetupSaver(QTreeViewStateSaver* stateSaver);
+
+        QTreeViewStateSaver* m_treeStateSaver = nullptr;
+    };
+
+
+    // NOTE: This class should never be used directly anymore. Using it, unless you know what you're doing,
+    // can result in weird crashes in destructors because things are deleted in the wrong order.
+    // It's being left here for backwards compatibility. If you have a branch building with this class
+    // either switch your QTreeView into a QTreeViewWithStateSaving or make QTreeViewStateSaver's main methods public
+    // in your branch.
     class QTreeViewStateSaver
         : public QObject
     {
         Q_OBJECT
 
     public:
-        AZ_CLASS_ALLOCATOR(QTreeViewStateSaver, AZ::SystemAllocator, 0);
+        static void Reflect(AZ::ReflectContext* context);
+
+    private:
+
+        friend class QTreeViewWithStateSaving;
+
         explicit QTreeViewStateSaver(AZ::u32 storageID, QObject* pParent = nullptr);
         ~QTreeViewStateSaver() override;
 
@@ -59,9 +106,6 @@ namespace AzToolsFramework
 
         void ApplySnapshot() const;
 
-        static void Reflect(AZ::ReflectContext* context);
-        
-    public Q_SLOTS:
         void Detach();
 
     private:
@@ -91,48 +135,5 @@ namespace AzToolsFramework
 
         Q_DISABLE_COPY(QTreeViewStateSaver)
     };
-
-    // Special class to wrap saving and restoring tree state
-    // Wouldn't be necessary if there was a way to listen for changes to QTreeView's
-    // data model and selection model.
-    // Use this instead of QTreeView to handle most of the details of saving and loading
-    // tree view state.
-    class QTreeViewWithStateSaving
-        : public QTreeView
-    {
-        Q_OBJECT
-
-    public:
-        // NOTE: This class in particular is used by classes that don't initialize the AZ Allocators
-        // We can't currently use it with AZ_CLASS_ALLOCATOR.
-        // ie AZ_CLASS_ALLOCATOR(QTreeViewWithStateSaving, AZ::SystemAllocator, 0);
-
-        explicit QTreeViewWithStateSaving(QWidget* parent = nullptr);
-        ~QTreeViewWithStateSaving() override;
-
-        // One of the Initialize methods must be called before tree view state can be saved or loaded
-        void InitializeTreeViewSaving(AZ::u32 storageID);
-
-        void CaptureTreeViewSnapshot() const;
-        void ApplyTreeViewSnapshot() const;
-
-        void WriteTreeViewStateTo(QSet<QString>& target);
-        void ReadTreeViewStateFrom(QSet<QString>& source);
-
-        void PauseTreeViewSaving();
-        void UnpauseTreeViewSaving();
-
-        bool IsTreeViewSavingReady() const { return m_treeStateSaver != nullptr; }
-
-        // These are overridden so that this class knows when the models change
-        void setModel(QAbstractItemModel* model) override;
-        void setSelectionModel(QItemSelectionModel* selectionModel) override;
-
-    protected:
-        void SetupSaver(QTreeViewStateSaver* stateSaver);
-
-        QTreeViewStateSaver* m_treeStateSaver = nullptr;
-    };
 }
 
-#endif

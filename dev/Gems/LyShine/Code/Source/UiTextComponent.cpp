@@ -1745,10 +1745,30 @@ float UiTextComponent::GetExtraHeightRatio()
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-void UiTextComponent::LanguageChanged()
+void UiTextComponent::OnFontsReloaded()
 {
+    // All old font pointers have been deleted and the old font family pointers have been removed from the CryFont list.
+    // New fonts and font family objects have been created and added to the CryFont list.
+    // However, the old font family objects are still around because we have a shared pointer to them.
+    // Clear the font family shared pointers since they should no longer be used (their fonts have been deleted).
+    // When the last one is cleared, the font family's custom deleter will be called and the object will be deleted.
+    // This is OK because the custom deleter doesn't do anything if the font family is not in the CryFont's list (which it isn't)
+    m_font = nullptr;
+    m_fontFamily = nullptr;
+    m_overrideFontFamily = nullptr;
+    m_isFontFamilyOverridden = false;
+
     // the font family may have been deleted and reloaded so make sure we update m_fontFamily
     ChangeFont(m_fontFilename.GetAssetPath());
+
+    // It's possible that the font failed to load. If it did, try to load and use the default font but leave the
+    // assigned font path the same
+    if (!m_fontFamily || !m_font)
+    {
+        AZStd::string assignedFontFilepath = m_fontFilename.GetAssetPath();
+        ChangeFont("");
+        m_fontFilename.SetAssetPath(assignedFontFilepath.c_str());
+    }
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -1839,7 +1859,6 @@ void UiTextComponent::Reflect(AZ::ReflectContext* context)
     if (behaviorContext)
     {
         behaviorContext->EBus<UiTextBus>("UiTextBus")
-            ->Attribute(AZ::Script::Attributes::ExcludeFrom, AZ::Script::Attributes::ExcludeFlags::Preview)
             ->Event("GetText", &UiTextBus::Events::GetText)
             ->Event("SetText", &UiTextBus::Events::SetText)
             ->Event("GetColor", &UiTextBus::Events::GetColor)
@@ -1920,7 +1939,7 @@ void UiTextComponent::Activate()
     UiAnimateEntityBus::Handler::BusConnect(m_entity->GetId());
     UiTransformChangeNotificationBus::Handler::BusConnect(m_entity->GetId());
     UiLayoutCellDefaultBus::Handler::BusConnect(m_entity->GetId());
-    LanguageChangeNotificationBus::Handler::BusConnect();
+    FontNotificationBus::Handler::BusConnect();
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -1933,7 +1952,7 @@ void UiTextComponent::Deactivate()
     UiAnimateEntityBus::Handler::BusDisconnect();
     UiTransformChangeNotificationBus::Handler::BusDisconnect();
     UiLayoutCellDefaultBus::Handler::BusDisconnect();
-    LanguageChangeNotificationBus::Handler::BusDisconnect();
+    FontNotificationBus::Handler::BusDisconnect();
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -1964,6 +1983,7 @@ void UiTextComponent::ChangeFont(const AZStd::string& fontFileName)
         if (m_fontEffectIndex >= numEffects)
         {
             m_fontEffectIndex = 0;
+            AZ_Warning("UiTextComponent", false, "Font effect index is out of range for changed font, resetting index to 0");
         }
 
         if (!m_isFontFamilyOverridden)
@@ -2506,7 +2526,7 @@ STextDrawContext UiTextComponent::GetTextDrawContextPrototype() const
     ctx.SetSizeIn800x600(false);
     ctx.SetSize(vector2f(m_fontSize, m_fontSize));
     ctx.m_processSpecialChars = false;
-    ctx.m_tracking = m_charSpacing / 1000.0f;
+    ctx.m_tracking = (m_charSpacing * m_fontSize) / 1000.0f; // m_charSpacing units are 1/1000th of ems, 1 em is equal to font size
     return ctx;
 }
 

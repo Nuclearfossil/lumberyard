@@ -14,33 +14,28 @@
 #include "StdAfx.h"
 #include "System.h"
 #include <AZCrySystemInitLogSink.h>
+#define USE_CRY_NEW_AND_DELETE 1
 #include <platform_impl.h>
 #include "DebugCallStack.h"
 
+
+#if defined(AZ_RESTRICTED_PLATFORM)
+#undef AZ_RESTRICTED_SECTION
+#define DLLMAIN_CPP_SECTION_1 1
+#define DLLMAIN_CPP_SECTION_2 2
+#define DLLMAIN_CPP_SECTION_3 3
+#define DLLMAIN_CPP_SECTION_4 4
+#endif
+
+#if defined(AZ_RESTRICTED_PLATFORM)
+#define AZ_RESTRICTED_SECTION DLLMAIN_CPP_SECTION_1
+#include AZ_RESTRICTED_FILE(DllMain_cpp, AZ_RESTRICTED_PLATFORM)
+#endif
 
 // For lua debugger
 //#include <malloc.h>
 
 HMODULE gDLLHandle = NULL;
-
-
-struct DummyInitializer
-{
-    DummyInitializer()
-    {
-        dummyValue = 1;
-    }
-
-    int dummyValue;
-};
-
-DummyInitializer& initDummy()
-{
-    static DummyInitializer* p = new DummyInitializer;
-    return *p;
-}
-
-static int warmAllocator = initDummy().dummyValue;
 
 #if !defined(AZ_MONOLITHIC_BUILD) && defined(AZ_HAS_DLL_SUPPORT) && !defined(AZ_PLATFORM_LINUX) && !defined(AZ_PLATFORM_APPLE) && !defined(AZ_PLATFORM_ANDROID)
 #pragma warning( push )
@@ -70,12 +65,6 @@ BOOL APIENTRY DllMain(HANDLE hModule,
 #pragma warning( pop )
 #endif
 
-#if defined(USE_GLOBAL_BUCKET_ALLOCATOR)
-#include "CryMemoryAllocator.h"
-#include "BucketAllocator.h"
-extern void EnableDynamicBucketCleanups(bool enable);
-#endif
-
 //////////////////////////////////////////////////////////////////////////
 struct CSystemEventListner_System
     : public ISystemEventListener
@@ -83,21 +72,6 @@ struct CSystemEventListner_System
 public:
     virtual void OnSystemEvent(ESystemEvent event, UINT_PTR wparam, UINT_PTR lparam)
     {
-#if defined(USE_GLOBAL_BUCKET_ALLOCATOR)
-        switch (event)
-        {
-        case ESYSTEM_EVENT_LEVEL_UNLOAD:
-        case ESYSTEM_EVENT_LEVEL_LOAD_START:
-        case ESYSTEM_EVENT_LEVEL_POST_UNLOAD:
-            EnableDynamicBucketCleanups(true);
-            break;
-
-        case ESYSTEM_EVENT_LEVEL_LOAD_END:
-            EnableDynamicBucketCleanups(false);
-            break;
-        }
-#endif
-
         switch (event)
         {
         case ESYSTEM_EVENT_LEVEL_UNLOAD:
@@ -124,6 +98,18 @@ public:
 
 static CSystemEventListner_System g_system_event_listener_system;
 
+static AZ::EnvironmentVariable<IMemoryManager*> s_cryMemoryManager;
+
+
+// Force the CryMemoryManager into the AZ::Environment for exposure to other DLLs
+void ExportCryMemoryManager()
+{
+    IMemoryManager* cryMemoryManager = nullptr;
+    CryGetIMemoryManagerInterface((void**)&cryMemoryManager);
+    AZ_Assert(cryMemoryManager, "Unable to resolve CryMemoryManager");
+    s_cryMemoryManager = AZ::Environment::CreateVariable<IMemoryManager*>("CryIMemoryManagerInterface", cryMemoryManager);
+}
+
 extern "C"
 {
 CRYSYSTEM_API ISystem* CreateSystemInterface(const SSystemInitParams& startupParams)
@@ -132,11 +118,18 @@ CRYSYSTEM_API ISystem* CreateSystemInterface(const SSystemInitParams& startupPar
 
     // We must attach to the environment prior to allocating CSystem, as opposed to waiting
     // for ModuleInitISystem(), because the log message sink uses buses.
-    AZ::Environment::Attach(startupParams.pSharedEnvironment);
+    // Environment should have been attached via InjectEnvironment
+    AZ_Assert(AZ::Environment::IsReady(), "Environment is not attached, must be attached before CreateSystemInterface can be called");
+
+    ExportCryMemoryManager();
 
     pSystem = new CSystem(startupParams.pSharedEnvironment);
     ModuleInitISystem(pSystem, "CrySystem");
 
+#if defined(AZ_RESTRICTED_PLATFORM)
+#define AZ_RESTRICTED_SECTION DLLMAIN_CPP_SECTION_2
+#include AZ_RESTRICTED_FILE(DllMain_cpp, AZ_RESTRICTED_PLATFORM)
+#endif
 #if defined(AZ_MONOLITHIC_BUILD)
     ICryFactoryRegistryImpl* pCryFactoryImpl = static_cast<ICryFactoryRegistryImpl*>(pSystem->GetCryFactoryRegistry());
     pCryFactoryImpl->RegisterFactories(g_pHeadToRegFactories);
@@ -156,6 +149,9 @@ CRYSYSTEM_API ISystem* CreateSystemInterface(const SSystemInitParams& startupPar
 #if defined(WIN32)
         // Install exception handler in Release modes.
         ((DebugCallStack*)IDebugCallStack::instance())->installErrorHandler(pSystem);
+#elif defined(AZ_RESTRICTED_PLATFORM)
+#define AZ_RESTRICTED_SECTION DLLMAIN_CPP_SECTION_3
+#include AZ_RESTRICTED_FILE(DllMain_cpp, AZ_RESTRICTED_PLATFORM)
 #endif
     }
 
@@ -183,6 +179,10 @@ CRYSYSTEM_API ISystem* CreateSystemInterface(const SSystemInitParams& startupPar
 
 CRYSYSTEM_API void WINAPI CryInstallUnhandledExceptionHandler()
 {
+#if defined(AZ_RESTRICTED_PLATFORM)
+#define AZ_RESTRICTED_SECTION DLLMAIN_CPP_SECTION_4
+#include AZ_RESTRICTED_FILE(DllMain_cpp, AZ_RESTRICTED_PLATFORM)
+#endif
 }
 
 #if defined(ENABLE_PROFILING_CODE) && !defined(LINUX) && !defined(APPLE)

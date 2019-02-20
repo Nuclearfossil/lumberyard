@@ -71,7 +71,7 @@ namespace ServiceAPI {
         AZ_CLASS_ALLOCATOR({{ item.name }}, AZ::SystemAllocator, 0)
 
         {% for prop in item.props %}
-        {{ prop.type }} {{prop.name}};
+        {{ prop.type }} {{prop.name}}{{prop.init}};
         {% endfor %}
 
         bool OnJsonKey(const char* key, CloudGemFramework::JsonReader& reader);
@@ -232,7 +232,7 @@ namespace ServiceAPI {
             if (serializeContext)
             {
                 // we must include any fields we want to expose to the editor or lua in the serialize context
-                serializeContext->Class<{{ json_object.componentClass }}>()
+                serializeContext->Class<{{ json_object.componentClass }}, AZ::Component>()
                     ->Version(1);
 
                 AZ::EditContext* editContext = serializeContext->GetEditContext();

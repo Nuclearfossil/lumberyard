@@ -125,6 +125,8 @@ namespace AssetProcessor
         //products
         bool GetProducts(AzToolsFramework::AssetDatabase::ProductDatabaseEntryContainer& container, AZ::Uuid builderGuid = AZ::Uuid::CreateNull(), QString jobKey = QString(), QString platform = QString(), AzToolsFramework::AssetSystem::JobStatus status = AzToolsFramework::AssetSystem::JobStatus::Any);
         bool GetProductsByJobID(AZ::s64 jobID, AzToolsFramework::AssetDatabase::ProductDatabaseEntryContainer& container);
+        // note that the pair of (JobID, SubID) uniquely identifies a single job, and thus the result is always only one entry:
+        bool GetProductByJobIDSubId(AZ::s64 jobID, AZ::u32 subID, AzToolsFramework::AssetDatabase::ProductDatabaseEntry& result);
         
         bool GetProductByProductID(AZ::s64 productID, AzToolsFramework::AssetDatabase::ProductDatabaseEntry& entry);
         bool GetProductsByProductName(QString exactProductName, AzToolsFramework::AssetDatabase::ProductDatabaseEntryContainer& container, AZ::Uuid builderGuid = AZ::Uuid::CreateNull(), QString jobKey = QString(), QString platform = QString(), AzToolsFramework::AssetSystem::JobStatus status = AzToolsFramework::AssetSystem::JobStatus::Any);
@@ -173,9 +175,20 @@ namespace AssetProcessor
         bool GetDirectProductDependencies(AZ::s64 productID, AzToolsFramework::AssetDatabase::ProductDatabaseEntryContainer& container);
         bool GetAllProductDependencies(AZ::s64 productID, AzToolsFramework::AssetDatabase::ProductDatabaseEntryContainer& container);
         bool SetProductDependency(AzToolsFramework::AssetDatabase::ProductDependencyDatabaseEntry& entry);
-        bool SetProductDependencies(AzToolsFramework::AssetDatabase::ProductDependencyDatabaseEntryContainer& container);
+
+        // bulk inserts are lighter weight and don't change the input data.  Note that this also deletes old dependencies for the products mentioned in the container.
+        bool SetProductDependencies(const AzToolsFramework::AssetDatabase::ProductDependencyDatabaseEntryContainer& container);
+
         bool RemoveProductDependencyByProductId(AZ::s64 productID);
- 
+
+        //Files
+        bool GetFileByFileID(AZ::s64 fileID, AzToolsFramework::AssetDatabase::FileDatabaseEntry& entry);
+        bool GetFileByFileNameAndScanFolderId(QString fileName, AZ::s64 scanFolderId, AzToolsFramework::AssetDatabase::FileDatabaseEntry& entry);
+        bool GetFilesLikeFileName(QString likeFileName, LikeType likeType, AzToolsFramework::AssetDatabase::FileDatabaseEntryContainer& container);
+
+        bool InsertFile(AzToolsFramework::AssetDatabase::FileDatabaseEntry& entry);
+        bool UpdateFile(AzToolsFramework::AssetDatabase::FileDatabaseEntry& entry);
+        bool RemoveFile(AZ::s64 sourceID);
     protected:
         void SetDatabaseVersion(AzToolsFramework::AssetDatabase::DatabaseVersion ver);
         void ExecuteCreateStatements();

@@ -23,10 +23,12 @@ import atexit, shutil, threading, collections, hashlib, subprocess
 import xml.etree.ElementTree as ET
 
 from contextlib import contextmanager
+from datetime import datetime
 from subprocess import call, check_output
 
 from cry_utils import append_to_unique_list, get_command_line_limit
-from third_party import is_third_party_uselib_configured
+from packaging import run_rc_job
+from utils import junction_directory, remove_junction
 
 from waflib import Context, TaskGen, Build, Utils, Node, Logs, Options, Errors
 from waflib.Build import POST_LAZY, POST_AT_ONCE
@@ -47,6 +49,25 @@ ANDROID_LIBRARY_FILES = 'android_libraries.json'
 RESOLUTION_MESSAGE = 'Please re-run Setup Assistant with "Compile For Android" enabled and run the configure command again.'
 
 RESOLUTION_SETTINGS = ( 'mdpi', 'hdpi', 'xhdpi', 'xxhdpi', 'xxxhdpi' )
+
+DEFAULT_CONFIG_CHANGES = [
+    'keyboard',
+    'keyboardHidden',
+    'orientation',
+    'screenSize',
+    'smallestScreenSize',
+    'screenLayout',
+    'uiMode',
+]
+
+ORIENTATION_LANDSCAPE = 1 << 0
+ORIENTATION_PORTRAIT = 1 << 1
+ORIENTATION_ALL = (ORIENTATION_LANDSCAPE | ORIENTATION_PORTRAIT)
+
+ORIENTATION_FLAG_TO_KEY_MAP  = {
+    ORIENTATION_LANDSCAPE : 'land',
+    ORIENTATION_PORTRAIT : 'port',
+}
 
 LATEST_KEYWORD = 'latest'
 
@@ -70,14 +91,15 @@ SUPPORTED_APIS = [
 ]
 
 MIN_ARMv8_API = 'android-21'
+MIN_MULTI_WINDOW_API = 'android-24'
 
 # while some earlier versions may work, it's probably best to enforce a min version of the build tools
 MIN_BUILD_TOOLS_VERSION = '19.1.0'
 
-# known build tools versions with stablity issues
+# known build tools versions with stability issues
 UNSUPPORTED_BUILD_TOOLS_VERSIONS = {
     'win32' : [
-        '24.0.0'        # works fine on win 7 machines but consistantly crashes on win 10 machines
+        '24.0.0'        # works fine on win 7 machines but consistently crashes on win 10 machines
     ]
 }
 
@@ -108,14 +130,11 @@ ACCESS_NORMAL = 0 # the device is not rooted, we do not have access to any eleva
 ACCESS_ROOT_ADBD = 1 # the device is rooted, we have elevated permissions at the adb level
 ACCESS_SHELL_SU = 2 # the device is rooted, we only have elevated permissions using 'adb shell su -c'
 
-# The default permissions for installed libriares on device.
+# The default permissions for installed libraries on device.
 LIB_FILE_PERMISSIONS = '755'
 
 # The default owner:group for installed libraries on device.
 LIB_OWNER_GROUP = 'system:system'
-
-# the default file permissions after copies are made.  511 => 'chmod 777 <file>'
-FILE_PERMISSIONS = 511
 
 AUTO_GEN_HEADER_PYTHON = r'''
 ################################################################
@@ -124,50 +143,18 @@ AUTO_GEN_HEADER_PYTHON = r'''
 ################################################################
 
 '''
+
+ADB_QUOTED_PATH = None
+
 #                                                              #
 ################################################################
-
-
-################################################################
-"""
-Parts of the Android build process require the ability to create directory junctions/symlinks to make sure some assets are properly
-included in the build while maintaining as small of a memory footprint as possible (don't want to make copies).  Since we only care
-about directories, we don't need the full power of os.symlink (doesn't work on windows anyway and writing one would require either
-admin privileges or running something such as a VB script to create a shortcut to bypass the admin issue; neither of those options
-are desirable).  The following functions are to make it explicitly clear we only care about directory links.
-"""
-def junction_directory(source, link_name):
-    if not os.path.isdir(source):
-        Logs.error("[ERROR] Attempting to make a junction to a file, which is not supported.  Unexpected behaviour may result.")
-        return
-
-    if Utils.unversioned_sys_platform() == "win32":
-        cleaned_source_name = '"' + source.replace('/', '\\') + '"'
-        cleaned_link_name = '"' + link_name.replace('/', '\\') + '"'
-
-        # mklink generaully requires admin privileges, however directory junctions don't.
-        # subprocess.check_call will auto raise.
-        subprocess.check_call('mklink /D /J %s %s' % (cleaned_link_name, cleaned_source_name), shell=True)
-    else:
-        os.symlink(source, link_name)
-
-
-def remove_junction(junction_path):
-    """
-    Wrapper for correctly deleting a symlink/junction regardless of host platform
-    """
-    if Utils.unversioned_sys_platform() == "win32":
-        os.rmdir(junction_path)
-    else:
-        os.unlink(junction_path)
-
 
 @contextmanager
 def push_dir(directory):
     """
-    Temporarily changes the current working directory.  By decorating it with the contexmanager, makes this function only 
-    useable in "with" statements, otherwise its a no-op.  When the "with" statement is executed, this function will run
-    till the yeild, then run what's inside the "with" statement and finally run what's after the yeild.
+    Temporarily changes the current working directory.  By decorating it with the contexmanager, makes this function only
+    usable in "with" statements, otherwise its a no-op.  When the "with" statement is executed, this function will run
+    till the yield, then run what's inside the "with" statement and finally run what's after the yield.
     """
     previous_dir = os.getcwd()
     os.chdir(directory)
@@ -194,7 +181,7 @@ def apply_so_name(self):
 @conf
 def get_android_api_lib_list(ctx):
     """
-    Gets a list of android apis that pre-built libs could be built against based 
+    Gets a list of android apis that pre-built libs could be built against based
     on the current build target e.g. NDK_PLATFORM
     """
     api_list = sorted(SUPPORTED_APIS)
@@ -251,8 +238,7 @@ def construct_source_path(conf, project, source_path):
     if os.path.isabs(source_path):
         path_node = conf.root.make_node(source_path)
     else:
-        relative_path = os.path.join('Code', project, 'Resources', source_path)
-        path_node = conf.path.make_node(relative_path)
+        path_node = conf.root.make_node([ Context.launch_dir, conf.game_code_folder(project), 'Resources', source_path ])
     return path_node.abspath()
 
 
@@ -287,11 +273,9 @@ def options(opt):
     group.add_option('--distro-store-pass', dest = 'distro_store_pass', action = 'store', default = '', help = 'The store password for the distribution keystore')
     group.add_option('--distro-key-pass', dest = 'distro_key_pass', action = 'store', default = '', help = 'The key password for the distribution keystore')
 
-    group.add_option('--android-apk-path', dest = 'apk_path', action = 'store', default = '', help = 'Path to apk to deploy. If not specified the default build path will be used')
-
     group.add_option('--from-editor-deploy', dest = 'from_editor_deploy', action = 'store_true', default = False, help = 'Signals that the build is coming from the editor deployment tool')
 
-    group.add_option('--deploy-android-attempt-libs-only', dest = 'deploy_android_attempt_libs_only', action = 'store_true', default = False, 
+    group.add_option('--deploy-android-attempt-libs-only', dest = 'deploy_android_attempt_libs_only', action = 'store_true', default = False,
         help = 'Will only push the changed native libraries.  If "deploy_android_executable" is enabled, it will take precedent if modified.  Option ignored if "deploy_android_clean_device" is enabled.  This feature is only available for "unlocked" devices.')
 
 
@@ -396,9 +380,9 @@ def configure(conf):
     env['ANDROID_NDK_PLATFORM'] = ndk_platform
     env['ANDROID_NDK_PLATFORM_NUMBER'] = int(ndk_platform.split('-')[1])
 
-    # final check is to make sure the ndk platform <= sdk version to ensure compatibilty
+    # final check is to make sure the ndk platform <= sdk version to ensure compatibility
     if not (ndk_platform <= sdk_version):
-        conf.fatal('[ERROR] The Android API specified in NDK_PLATFORM - {} - is newer than the API specified in SDK_VERSION - {}; this can lead to compatibilty issues.\n'
+        conf.fatal('[ERROR] The Android API specified in NDK_PLATFORM - {} - is newer than the API specified in SDK_VERSION - {}; this can lead to compatibility issues.\n'
                     'Please update your _WAF_/android/android_settings.json to make sure NDK_PLATFORM <= SDK_VERSION and run the configure command again.'.format(ndk_platform, sdk_version))
 
     # validate the desired SDK build-tools version
@@ -550,7 +534,7 @@ def add_to_android_cache(conf, path_to_resource):
     files_node.delete()
 
     shutil.copy2(path_to_resource, files_node.abspath())
-    files_node.chmod(FILE_PERMISSIONS)
+    files_node.chmod(Utils.O755)
 
     rel_path = files_node.path_from(cache_node)
     Logs.debug('android: Adding resource - {} - to Android cache'.format(rel_path))
@@ -589,7 +573,7 @@ def process_json(conf, json_data, curr_node, root_node, template, copied_files):
             transformed_text = string.Template(source_curr.read()).substitute(template)
             target_curr.write(transformed_text)
 
-        target_curr.chmod(FILE_PERMISSIONS)
+        target_curr.chmod(Utils.O755)
         copied_files.append(target_curr.abspath())
 
 
@@ -687,6 +671,102 @@ def copy_and_patch_android_libraries(conf, source_node, android_root):
 
 
 ################################################################
+def process_multi_window_settings(conf, game_project, multi_window_settings, template):
+
+    def _is_number_option_valid(value, name):
+        if value:
+            if isinstance(value, int):
+                return True
+            else:
+                Logs.warn('[WARN] Invalid value for property "{}", expected whole number'.format(name))
+        return False
+
+    launch_in_fullscreen = False
+
+    # the Samsung DEX specific values can be added regardless of target API and multi-window support
+    samsung_dex_options = multi_window_settings.get('samsung_dex_options', None)
+    if samsung_dex_options:
+        launch_in_fullscreen = samsung_dex_options.get('launch_in_fullscreen', False)
+
+        # setting the launch window size in DEX mode since launching in fullscreen is strictly tied
+        # to multi-window being enabled
+        launch_width = samsung_dex_options.get('launch_width', None)
+        launch_height = samsung_dex_options.get('launch_height', None)
+
+        # both have to be specified otherwise they are ignored
+        if _is_number_option_valid(launch_width, 'launch_width') and _is_number_option_valid(launch_height, 'launch_height'):
+            template['SAMSUNG_DEX_LAUNCH_WIDTH'] = ('<meta-data '
+                'android:name="com.samsung.android.sdk.multiwindow.dex.launchwidth" '
+                'android:value="{}"/>'.format(launch_width))
+
+            template['SAMSUNG_DEX_LAUNCH_HEIGHT'] = ('<meta-data '
+                'android:name="com.samsung.android.sdk.multiwindow.dex.launchheight" '
+                'android:value="{}"/>'.format(launch_height))
+
+        keep_alive = samsung_dex_options.get('keep_alive', None)
+        if keep_alive in ( True, False ):
+            template['SAMSUNG_DEX_KEEP_ALIVE'] = '<meta-data android:name="com.samsung.android.keepalive.density" android:value="{}" />'.format(str(keep_alive).lower())
+
+    sdk_version = conf.get_android_sdk_version()
+    multi_window_enabled = multi_window_settings.get('enabled', False)
+
+    # multi-window support requires the target Java API to be 24 or above
+    if sdk_version < MIN_MULTI_WINDOW_API:
+        if multi_window_enabled:
+            Logs.warn('[WARN] Multi-window support for project {} requires SDK_VERSION to be {} or higher.  Disabling Multi-window support.'.format(game_project, MIN_MULTI_WINDOW_API))
+        return False
+
+    # the option to change the display resolution was added in API 24 as well, these changes are sent as density changes
+    template['ANDROID_CONFIG_CHANGES'] = '|'.join(DEFAULT_CONFIG_CHANGES + [ 'density' ])
+
+    # if targeting above the min API level the default value for this attribute is true so we need to explicitly disable it
+    template['ANDROID_MULTI_WINDOW'] = 'android:resizeableActivity="{}"'.format(str(multi_window_enabled).lower())
+
+    if not multi_window_enabled:
+        return False
+
+    # remove the DEX launch window size if requested to launch in fullscreen mode
+    if launch_in_fullscreen:
+        template['SAMSUNG_DEX_LAUNCH_WIDTH'] = ''
+        template['SAMSUNG_DEX_LAUNCH_HEIGHT'] = ''
+
+    default_width = multi_window_settings.get('default_width', None)
+    default_height = multi_window_settings.get('default_height', None)
+
+    min_width = multi_window_settings.get('min_width', None)
+    min_height = multi_window_settings.get('min_height', None)
+
+    gravity = multi_window_settings.get('gravity', None)
+
+    layout = ''
+    if any([ default_width, default_height, min_width, min_height, gravity ]):
+        layout = '<layout '
+
+        # the default width/height values are respected as launch values in DEX mode so they should
+        # be ignored if the intension is to launch in fullscreen when running in DEX mode
+        if not launch_in_fullscreen:
+            if _is_number_option_valid(default_width, 'default_width'):
+                layout += 'android:defaultWidth="{}dp" '.format(default_width)
+
+            if _is_number_option_valid(default_height, 'default_height'):
+                layout += 'android:defaultHeight="{}dp" '.format(default_height)
+
+        if _is_number_option_valid(min_height, 'min_height'):
+            layout += 'android:minHeight="{}dp" '.format(min_height)
+
+        if _is_number_option_valid(min_width, 'min_width'):
+            layout += 'android:minWidth="{}dp" '.format(min_width)
+
+        if gravity:
+            layout += 'android:gravity="{}" '.format(gravity)
+
+        layout += '/>'
+
+    template['ANDROID_MULTI_WINDOW_PROPERTIES'] = layout
+
+    return True
+
+
 @conf
 def create_and_add_android_launchers_to_build(conf):
     """
@@ -710,8 +790,10 @@ def create_and_add_android_launchers_to_build(conf):
 
     created_directories = []
     for project in conf.get_enabled_game_project_list():
+
         # make sure the project has android options specified
-        if conf.get_android_settings(project) == None:
+        android_settings = conf.get_android_settings(project)
+        if not android_settings:
             Logs.warn('[WARN] Android settings not found in %s/project.json, skipping.' % project)
             continue
 
@@ -741,6 +823,7 @@ def create_and_add_android_launchers_to_build(conf):
             'ANDROID_VERSION_NUMBER' : conf.get_android_version_number(project),
             'ANDROID_VERSION_NAME' : conf.get_android_version_name(project),
 
+            'ANDROID_CONFIG_CHANGES' : '|'.join(DEFAULT_CONFIG_CHANGES),
             'ANDROID_SCREEN_ORIENTATION' : conf.get_android_orientation(project),
 
             'ANDROID_APP_PUBLIC_KEY' : conf.get_android_app_public_key(project),
@@ -749,10 +832,34 @@ def create_and_add_android_launchers_to_build(conf):
             'ANDROID_USE_MAIN_OBB' : conf.get_android_use_main_obb(project),
             'ANDROID_USE_PATCH_OBB' : conf.get_android_use_patch_obb(project),
             'ANDROID_ENABLE_KEEP_SCREEN_ON' : conf.get_android_enable_keep_screen_on(project),
+            'ANDROID_DISABLE_IMMERSIVE_MODE' : conf.get_android_disable_immersive_mode(project),
 
             'ANDROID_MIN_SDK_VERSION' : conf.env['ANDROID_NDK_PLATFORM_NUMBER'],
             'ANDROID_TARGET_SDK_VERSION' : conf.env['ANDROID_SDK_VERSION_NUMBER'],
+
+            'ANDROID_MULTI_WINDOW' : '',
+            'ANDROID_MULTI_WINDOW_PROPERTIES' : '',
+
+            'SAMSUNG_DEX_KEEP_ALIVE' : '',
+            'SAMSUNG_DEX_LAUNCH_WIDTH' : '',
+            'SAMSUNG_DEX_LAUNCH_HEIGHT' : '',
         }
+
+        is_multi_window = False
+        multi_window_settings = android_settings.get('multi_window_options', None)
+        if multi_window_settings:
+            is_multi_window = process_multi_window_settings(conf, project, multi_window_settings, template)
+
+        # when multi-window support is enabled, the desired orientation is more of a suggestion
+        orientation = ORIENTATION_ALL
+        if not is_multi_window:
+            requested_orientation = conf.get_android_orientation(project)
+
+            if requested_orientation in ('landscape', 'reverseLandscape', 'sensorLandscape', 'userLandscape'):
+                orientation = ORIENTATION_LANDSCAPE
+
+            elif requested_orientation in ('portrait', 'reversePortrait', 'sensorPortrait', 'userPortrait'):
+                orientation = ORIENTATION_PORTRAIT
 
         # update the builder file with the correct package name
         transformed_node = builder_file_dest.find_or_declare('%s_builder.json' % project)
@@ -769,7 +876,7 @@ def create_and_add_android_launchers_to_build(conf):
         resource_node = proj_root.make_node(['src', 'main', 'res'])
 
         icon_overrides = conf.get_android_app_icons(project)
-        if icon_overrides is not None:
+        if icon_overrides:
             mipmap_path_prefix = 'mipmap'
 
             # if a default icon is specified, then copy it into the generic mipmap folder
@@ -783,13 +890,14 @@ def create_and_add_android_launchers_to_build(conf):
 
                 dest_file = os.path.join(default_icon_target_dir.abspath(), APP_ICON_NAME)
                 shutil.copyfile(default_icon_source_node, dest_file)
-                os.chmod(dest_file, FILE_PERMISSIONS)
+                os.chmod(dest_file, Utils.O755)
                 copied_files.append(dest_file)
 
             else:
                 Logs.debug('android: No default icon override specified for %s' % project)
 
             # process each of the resolution overrides
+            warnings = []
             for resolution in RESOLUTION_SETTINGS:
                 target_directory = resource_node.make_node(mipmap_path_prefix + '-' + resolution)
 
@@ -799,9 +907,11 @@ def create_and_add_android_launchers_to_build(conf):
 
                     # if both the resolution and the default are unspecified, warn the user but do nothing
                     if icon_source is None:
-                        Logs.warn('[WARN] No icon override found for "%s".  Either supply one for "%s" or a "default" in the android_settings "icon" section of the project.json file for %s' % (resolution, resolution, project))
+                        warnings.append(
+                            'No icon override found for "{}".  Either supply one for "{}" or a "default" in the android_settings "icon" section of the project.json file for {}'.format(resolution, resolution, project)
+                        )
 
-                    # if only the resoultion is unspecified, remove the resolution specific version from the project
+                    # if only the resolution is unspecified, remove the resolution specific version from the project
                     else:
                         Logs.debug('android: Default icon being used for "%s" in %s' % (resolution, project))
                         remove_file_and_empty_directory(target_directory.abspath(), APP_ICON_NAME)
@@ -812,23 +922,39 @@ def create_and_add_android_launchers_to_build(conf):
                 icon_target_node = target_directory.make_node(APP_ICON_NAME)
 
                 shutil.copyfile(icon_source_node, icon_target_node.abspath())
-                icon_target_node.chmod(FILE_PERMISSIONS)
+                icon_target_node.chmod(Utils.O755)
                 copied_files.append(icon_target_node.abspath())
+
+            # guard against spamming warnings in the case the icon override block is full of garbage and no actual overrides
+            if len(warnings) != len(RESOLUTION_SETTINGS):
+                for warning_msg in warnings:
+                    Logs.warn('[WARN] {}'.format(warning_msg))
 
         # resolve the application splash screen overrides
         splash_overrides = conf.get_android_app_splash_screens(project)
-        if splash_overrides is not None:
+        if splash_overrides:
             drawable_path_prefix = 'drawable-'
 
-            for orientation in ('land', 'port'):
-                orientation_path_prefix = drawable_path_prefix + orientation
+            for orientation_flag, orientation_key in ORIENTATION_FLAG_TO_KEY_MAP.iteritems():
+                orientation_path_prefix = drawable_path_prefix + orientation_key
 
-                oriented_splashes = splash_overrides.get(orientation, {})
+                oriented_splashes = splash_overrides.get(orientation_key, {})
+
+                unused_override_warning = None
+                if (orientation & orientation_flag) == 0:
+                    unused_override_warning = 'Splash screen overrides specified for "{}" when desired orientation is set to "{}" in project {}.  These overrides will be ignored.'.format(
+                                orientation_key,
+                                ORIENTATION_FLAG_TO_KEY_MAP[orientation],
+                                project)
 
                 # if a default splash image is specified for this orientation, then copy it into the generic drawable-<orientation> folder
                 default_splash_img = oriented_splashes.get('default', None)
 
                 if default_splash_img is not None:
+                    if unused_override_warning:
+                        Logs.warn('[WARN] {}'.format(unused_override_warning))
+                        continue
+
                     default_splash_img_source_node = construct_source_path(conf, project, default_splash_img)
 
                     default_splash_img_target_dir = resource_node.make_node(orientation_path_prefix)
@@ -836,18 +962,20 @@ def create_and_add_android_launchers_to_build(conf):
 
                     dest_file = os.path.join(default_splash_img_target_dir.abspath(), APP_SPLASH_NAME)
                     shutil.copyfile(default_splash_img_source_node, dest_file)
-                    os.chmod(dest_file, FILE_PERMISSIONS)
+                    os.chmod(dest_file, Utils.O755)
                     copied_files.append(dest_file)
 
                 else:
-                    Logs.debug('android: No default splash screen override specified for "%s" orientation in %s' % (orientation, project))
+                    Logs.debug('android: No default splash screen override specified for "%s" orientation in %s' % (orientation_key, project))
 
                 # process each of the resolution overrides
-                for resolution in RESOLUTION_SETTINGS:
-                    # The xxxhdpi resolution is only for application icons, its overkill to include them for drawables... for now
-                    if resolution == 'xxxhdpi':
-                        continue
+                warnings = []
 
+                # The xxxhdpi resolution is only for application icons, its overkill to include them for drawables... for now
+                valid_resolutions = set(RESOLUTION_SETTINGS)
+                valid_resolutions.discard('xxxhdpi') 
+
+                for resolution in valid_resolutions:
                     target_directory = resource_node.make_node(orientation_path_prefix + '-' + resolution)
 
                     # get the current resolution splash image override
@@ -856,12 +984,14 @@ def create_and_add_android_launchers_to_build(conf):
 
                         # if both the resolution and the default are unspecified, warn the user but do nothing
                         if splash_img_source is None:
-                            section = "%s-%s" % (orientation, resolution)
-                            Logs.warn('[WARN] No splash screen override found for "%s".  Either supply one for "%s" or a "default" in the android_settings "splash_screen-%s" section of the project.json file for %s' % (section, resolution, orientation, project))
+                            section = "%s-%s" % (orientation_key, resolution)
+                            warnings.append(
+                                'No splash screen override found for "{}".  Either supply one for "{}" or a "default" in the android_settings "splash_screen-{}" section of the project.json file for {}'.format(section, resolution, orientation_key, project)
+                            )
 
-                        # if only the resoultion is unspecified, remove the resolution specific version from the project
+                        # if only the resolution is unspecified, remove the resolution specific version from the project
                         else:
-                            Logs.debug('android: Default icon being used for "%s-%s" in %s' % (orientation, resolution, project))
+                            Logs.debug('android: Default splash screen being used for "%s-%s" in %s', orientation_key, resolution, project)
                             remove_file_and_empty_directory(target_directory.abspath(), APP_SPLASH_NAME)
 
                         continue
@@ -870,22 +1000,28 @@ def create_and_add_android_launchers_to_build(conf):
                     splash_img_target_node = target_directory.make_node(APP_SPLASH_NAME)
 
                     shutil.copyfile(splash_img_source_node, splash_img_target_node.abspath())
-                    splash_img_target_node.chmod(FILE_PERMISSIONS)
+                    splash_img_target_node.chmod(Utils.O755)
                     copied_files.append(splash_img_target_node.abspath())
 
-        # additional optimization to only include the splash screens for the avaiable orientations allowed by the manifest
-        requested_orientation = conf.get_android_orientation(project)
+                # guard against spamming warnings in the case the splash override block is full of garbage and no actual overrides
+                if len(warnings) != len(valid_resolutions):
+                    if unused_override_warning:
+                        Logs.warn('[WARN] {}'.format(unused_override_warning))
+                    else:
+                        for warning_msg in warnings:
+                            Logs.warn('[WARN] {}'.format(warning_msg))
 
-        if requested_orientation in ('landscape', 'reverseLandscape', 'sensorLandscape', 'userLandscape'):
+        # micro-optimization to clear assets from the final bundle that won't be used
+        if orientation == ORIENTATION_LANDSCAPE:
             Logs.debug('android: Clearing the portrait assets from %s' % project)
             clear_splash_assets(resource_node, 'drawable-port')
 
-        elif requested_orientation in ('portrait', 'reversePortrait', 'sensorPortrait', 'userPortrait'):
+        elif orientation == ORIENTATION_PORTRAIT:
             Logs.debug('android: Clearing the landscape assets from %s' % project)
             clear_splash_assets(resource_node, 'drawable-land')
 
         # delete all files from the destination folder that were not copied by the script
-        all_files = proj_root.ant_glob("**", excl=['wscript', 'build.gradle', 'assets_for_apk/*'])
+        all_files = proj_root.ant_glob("**", excl=['wscript', 'build.gradle', '*.iml', 'assets_for_apk/*'])
         files_to_delete = [path for path in all_files if path.abspath() not in copied_files]
 
         for file in files_to_delete:
@@ -938,7 +1074,32 @@ def is_module_for_game_project(self, module_name, game_project, project_name):
 
 
 ################################################################
-def collect_source_paths(android_task, src_path_tag):
+def collect_game_project_modules(ctx, game_project):
+
+    module_tasks = []
+    for group in ctx.groups:
+        for task_generator in group:
+            if not isinstance(task_generator, TaskGen.task_gen):
+                continue
+
+            Logs.debug('android: Processing task %s', task_generator.name)
+
+            task_type = getattr(task_generator, '_type', None)
+            if task_type not in ('stlib', 'shlib', 'objects'):
+                Logs.debug('android:  -> Task is NOT a C/C++ task, Skipping...')
+                continue
+
+            project_name = getattr(task_generator, 'project_name', None)
+            if not ctx.is_module_for_game_project(task_generator.name, game_project, project_name):
+                Logs.debug('android:  -> Task is NOT part of the game project, Skipping...')
+                continue
+
+            module_tasks.append(task_generator)
+
+    return module_tasks
+
+
+def collect_source_paths(android_task, module_tasks, src_path_tag):
 
     game_project = android_task.game_project
     bld = android_task.bld
@@ -955,51 +1116,22 @@ def collect_source_paths(android_task, src_path_tag):
     ]
 
     source_paths = []
-    for group in bld.groups:
-        for task_generator in group:
-            if not isinstance(task_generator, TaskGen.task_gen):
-                continue
+    for task_generator in module_tasks:
+        raw_paths = []
+        for tag in search_tags:
+            raw_paths += getattr(task_generator, tag, [])
 
-            Logs.debug('android: Processing task %s' % task_generator.name)
-
-            if not (getattr(task_generator, 'posted', None) and getattr(task_generator, 'link_task', None)):
-                Logs.debug('android:  -> Task is NOT posted, Skipping...')
-                continue
-
-            project_name = getattr(task_generator, 'project_name', None)
-            if not bld.is_module_for_game_project(task_generator.name, game_project, project_name):
-                Logs.debug('android:  -> Task is NOT part of the game project, Skipping...')
-                continue
-
-            raw_paths = []
-            for tag in search_tags:
-                raw_paths += getattr(task_generator, tag, [])
-
-            Logs.debug('android:  -> Raw Source Paths %s' % raw_paths)
-
-            for path in raw_paths:
-                if os.path.isabs(path):
-                    path = bld.root.make_node(path)
-                else:
-                    path = task_generator.path.make_node(path)
-                source_paths.append(path)
+        for path in raw_paths:
+            if os.path.isabs(path):
+                path = bld.root.make_node(path)
+            else:
+                path = task_generator.path.make_node(path)
+            source_paths.append(path)
 
     return source_paths
 
 
 ################################################################
-def get_resource_compiler_path(ctx):
-    if Utils.unversioned_sys_platform() == "win32":
-        paths = ['Bin64vc140', 'Bin64vc120', 'Bin64']
-    else:
-        paths = ['BinMac64', 'Bin64']
-    rc_search_paths = [os.path.join(ctx.path.abspath(), path, 'rc') for path in paths]
-    try:
-        return ctx.find_program('rc', path_list = rc_search_paths, silent_output = True)
-    except:
-        ctx.fatal('[ERROR] Failed to find the Resource Compiler in paths: {}'.format(paths))
-
-
 def get_python_path(ctx):
     python_cmd = 'python'
 
@@ -1243,65 +1375,51 @@ def create_debug_strip_task(self, source_file, dest_location):
 ################################################################
 @feature('c', 'cxx')
 @after_method('apply_link')
-def add_android_natives_processing(self):
-    if 'android' not in self.env['PLATFORM']:
+def android_natives_processing(self):
+
+    bld = self.bld
+    platform = bld.env['PLATFORM']
+    configuration = bld.env['CONFIGURATION']
+
+    link_task = getattr(self, 'link_task', None)
+
+    if (not bld.is_android_platform(platform)) or (not link_task) or (self._type != 'shlib'):
         return
 
-    if not getattr(self, 'link_task', None):
-        return
-
-    if self._type == 'stlib': # Do not copy static libs
-        return
-
-    output_node = self.bld.get_output_folders(self.bld.env['PLATFORM'], self.bld.env['CONFIGURATION'])[0]
-
+    output_node = self.bld.get_output_folders(platform, configuration)[0]
     project_name = getattr(self, 'project_name', None)
-    game_projects = self.bld.get_enabled_game_project_list()
 
-    for src in self.link_task.outputs:
+    game_project_builder_nodes = []
+    for game in bld.get_enabled_game_project_list():
+        if not bld.is_module_for_game_project(self.name, game, project_name):
+            continue
+
+        # If the game is a valid android project, a specific build native value will have been created during
+        # the project configuration.  Only process games with valid android project settings
+        game_build_native_key = '{}_BUILDER_NATIVES'.format(game)
+        if game_build_native_key not in self.env:
+            continue
+
+        builder_node = bld.root.find_dir(self.env[game_build_native_key])
+        if builder_node:
+            game_project_builder_nodes.append(builder_node)
+
+
+    for src in link_task.outputs:
         src_lib = output_node.make_node(src.name)
-
-        for game in game_projects:
-
-            game_build_native_key = '%s_BUILDER_NATIVES' % game
-
-            # If the game is a valid android project, a specific build native value will have been created during
-            # the project configuration.  Only process games with valid android project settings
-            if not game_build_native_key in self.env:
-                continue
-            game_build_native_node = self.bld.root.find_dir(self.env[game_build_native_key])
-
-            if self.bld.is_module_for_game_project(self.name, game, project_name):
-                self.create_debug_strip_task(src_lib, game_build_native_node)
+        for builder_node in game_project_builder_nodes:
+            self.create_debug_strip_task(src_lib, builder_node)
 
 
-################################################################
-@feature('c', 'cxx', 'copy_3rd_party_binaries')
-@after_method('apply_link')
-def add_3rd_party_library_stripping(self):
-    """
-    Strip and copy 3rd party shared libraries so they are included into the APK.
-    """
-    if 'android' not in self.env['PLATFORM'] or self.bld.spec_monolithic_build():
-        return
+    third_party_artifacts = getattr(self.env, 'COPY_3RD_PARTY_ARTIFACTS', [])
+    for artifact in third_party_artifacts:
+        _, ext = os.path.splitext(artifact.abspath())
+        # Only care about shared libraries
+        if ext != '.so':
+            continue
 
-    third_party_artifacts = self.env['COPY_3RD_PARTY_ARTIFACTS']
-    if third_party_artifacts:
-        game_projects = self.bld.get_enabled_game_project_list()
-        for source_node in third_party_artifacts:
-            _, ext = os.path.splitext(source_node.abspath())
-            # Only care about shared libraries
-            if ext == '.so':
-                for game in game_projects:
-                    game_build_native_key = '%s_BUILDER_NATIVES' % game
-
-                    # If the game is a valid android project, a specific build native value will have been created during
-                    # the project configuration.  Only process games with valid android project settings
-                    if not game_build_native_key in self.env:
-                        continue
-
-                    game_build_native_node = self.bld.root.find_dir(self.env[game_build_native_key])
-                    self.create_debug_strip_task(source_node, game_build_native_node)
+        for builder_node in game_project_builder_nodes:
+            self.create_debug_strip_task(artifact, builder_node)
 
 
 ################################################################
@@ -1344,7 +1462,7 @@ def AndroidAPK(ctx, *k, **kw):
     configuration = env['CONFIGURATION']
 
     if ctx.cmd in ('configure', 'generate_uber_files', 'generate_module_def_files', 'msvs'):
-        return 
+        return
     if not (ctx.is_android_platform(platform) or platform =='project_generator'):
         return
     if project_name not in ctx.get_enabled_game_project_list():
@@ -1352,6 +1470,11 @@ def AndroidAPK(ctx, *k, **kw):
 
     Logs.debug('android: ******************************** ')
     Logs.debug('android: Processing {}...'.format(project_name))
+
+    if not hasattr(ctx, 'default_group_name'):
+        default_group = ctx.get_group(None)
+        ctx.default_group_name = ctx.get_group_name(default_group)
+    Logs.debug('android: ctx.default_group_name = %s', ctx.default_group_name)
 
     root_input = ctx.path.get_src().make_node('src')
     root_output = ctx.path.get_bld()
@@ -1420,7 +1543,7 @@ def AndroidAPK(ctx, *k, **kw):
         ctx.fatal('[ERROR] Unable to find any AndroidManifest.xml files in project path {}.'.format(ctx.path.get_src().abspath()))
 
     Logs.debug('android: Found local Java source directories {}'.format(java_source_nodes))
-    Logs.debug('android: Found local resouce directories {}'.format(resource_nodes))
+    Logs.debug('android: Found local resource directories {}'.format(resource_nodes))
     Logs.debug('android: Found local manifest file {}'.format(android_manifests))
 
     # get the keystore passwords
@@ -1509,7 +1632,7 @@ def AndroidAPK(ctx, *k, **kw):
 
     Logs.debug('android: ****')
     Logs.debug('android: All Java source directories {}'.format(java_source_nodes))
-    Logs.debug('android: All resouce directories {}'.format(resource_nodes))
+    Logs.debug('android: All resource directories {}'.format(resource_nodes))
 
     java_include_paths = java_source_nodes + [ r_java_out, aidl_out ]
     java_source_paths = java_source_nodes
@@ -1567,7 +1690,7 @@ def AndroidAPK(ctx, *k, **kw):
 
     # reset the build group/mode back to default
     ctx.post_mode = POST_AT_ONCE
-    ctx.set_group('regular_group')
+    ctx.set_group(ctx.default_group_name)
 
 
 ################################################################
@@ -1615,13 +1738,31 @@ def apply_android_java(self):
     self.android_manifests = manifest_nodes
     self.main_android_manifest = manifest_nodes[0] # guaranteed to be the main; manifests are added in order of precedence highest to lowest
 
-    # process the uses, only first level uses are supported at this time
-    libs = self.to_list(getattr(self, 'use', []))
-    Logs.debug('android: -> Processing Android libs used by APK {}'.format(libs))
+    # process the uses
+    if not hasattr(self, 'use'):
+        setattr(self, 'use', [])
+
+    local_uses = self.to_list(self.use)[:]
+    Logs.debug('android: -> Processing Android libs used by %s: %s', self.name, local_uses)
+
+    # collect any AAR uses from other modules
+    game_project_modules = collect_game_project_modules(self.bld, self.game_project)
+
+    other_uses = []
+    for tsk in game_project_modules:
+        # skip the launchers / same module, those source paths were already added above
+        if tsk.name.endswith('AndroidLauncher'):
+            continue
+
+        other_uses.extend(self.to_list(getattr(tsk, 'use', [])))
+
+    other_uses = list(set(other_uses))
+    Logs.debug('android: -> Processing possible Android libs used by dependent modules: %s', other_uses)
 
     input_manifests = []
     use_libs_added = []
 
+    libs = local_uses + other_uses
     for lib_name in libs:
         try:
             task_gen = self.bld.get_tgen_by_name(lib_name)
@@ -1632,7 +1773,12 @@ def apply_android_java(self):
             if not hasattr(task_gen, 'aar_task'):
                 continue
 
+            Logs.debug('android: -> Applying AAR - %s - to the build', lib_name)
             use_libs_added.append(lib_name)
+
+            # ensure the lib is part of the APK uses so all the AAR properties are propagated
+            if lib_name not in local_uses:
+                append_to_unique_list(self.use, lib_name)
 
             # required entries from the library
             append_to_unique_list(self.aapt_extra_packages, task_gen.package)
@@ -1659,7 +1805,7 @@ def apply_android_java(self):
                     tgt = apk_native_lib_dir.make_node(rel_path)
 
                     strip_task = self.create_task('strip_debug_symbols', lib, tgt)
-                    self.bld.add_to_group(strip_task, 'regular_group')
+                    self.bld.add_to_group(strip_task, self.bld.default_group_name)
 
     Logs.debug('android: -> Android use libs added {}'.format(use_libs_added))
 
@@ -1697,7 +1843,7 @@ def apply_android_java(self):
         aidl_outdir = self.path.get_bld().make_node('aidl')
     aidl_outdir.mkdir()
 
-    aidl_src_paths = collect_source_paths(self, 'aidl_src_path')
+    aidl_src_paths = collect_source_paths(self, game_project_modules, 'aidl_src_path')
     self.aidl_tasks = []
 
     for srcdir in aidl_src_paths:
@@ -1709,10 +1855,10 @@ def apply_android_java(self):
             aidl_task = self.create_task('aidl', aidl_file, java_file)
             self.aidl_tasks.append(aidl_task)
 
-    java_src_paths = collect_source_paths(self, 'java_src_path')
+    java_src_paths = collect_source_paths(self, game_project_modules, 'java_src_path')
     append_to_unique_list(self.srcdir, java_src_paths)
 
-    jars = collect_source_paths(self, 'jars')
+    jars = collect_source_paths(self, game_project_modules, 'jars')
     append_to_unique_list(self.classpath, jars)
 
     Logs.debug('android: -> Additional Java source paths found {}'.format(java_src_paths))
@@ -1983,7 +2129,7 @@ def apply_android_apk(self):
 
 ###############################################################################
 ###############################################################################
-def adb_call(*cmdArgs, **keywords):
+def adb_call(*cmd_args, **keywords):
     '''
     Issue a adb command. Args are joined into a single string with spaces
     in between and keyword arguments supported is device=serial # of device
@@ -1993,12 +2139,13 @@ def adb_call(*cmdArgs, **keywords):
     adb_call('push', local_path, remote_path, device='123456') results in "adb -s 123456 push <local_path> <remote_path>" being executed
     '''
 
-    command = [ 'adb' ]
+    global ADB_QUOTED_PATH
+    command = [ ADB_QUOTED_PATH ]
 
     if 'device' in keywords:
         command.extend([ '-s', keywords['device'] ])
 
-    command.extend(cmdArgs)
+    command.extend(cmd_args)
 
     cmdline = ' '.join(command)
     Logs.debug('adb_call: running command \'%s\'', cmdline)
@@ -2008,9 +2155,9 @@ def adb_call(*cmdArgs, **keywords):
         stripped_output = output.rstrip()
 
         # don't need to dump the output of 'push' or 'install' commands
-        if not any(cmd for cmd in ('push', 'install') if cmd in cmdArgs):
+        if not any(cmd for cmd in ('push', 'install') if cmd in cmd_args):
             if '\n' in stripped_output:
-                # the newline arg is because Logs.debug will replace newlines with spaces 
+                # the newline arg is because Logs.debug will replace newlines with spaces
                 # in the format string before passing it on to the logger
                 Logs.debug('adb_call: output = %s%s', '\n', stripped_output)
             else:
@@ -2027,7 +2174,7 @@ def adb_ls(path, device_id, args = [], as_root = False):
     '''
     Special wrapper around calling "adb shell ls <args> <path>".  This uses
     adb_call under the hood but provides some additional error handling specific
-    to the "ls" command.  Optionally, this command can be run as super user, or 
+    to the "ls" command.  Optionally, this command can be run as super user, or
     'as_root', which is disabled by default.
     Returns:
         status - if the command failed or not
@@ -2112,41 +2259,50 @@ def get_device_access_type(device_id):
     return ACCESS_NORMAL
 
 
+def update_device_file_timestamp(remote_file_path, device_id, as_root = False):
+    '''
+    Updates the contents of the remote file with the current local time. Optionally, this
+    command can be run as super user, or 'as_root', which is disabled by default.
+    '''
+    adb_command = [ 'shell' ]
+    if as_root:
+        adb_command.extend([ 'su', '-c' ])
+
+    echo_command = '"echo {} > {}"'.format(datetime.now(), remote_file_path)
+    adb_command.append(echo_command)
+
+    adb_call(*adb_command, device = device_id)
+
+
 def get_device_file_timestamp(remote_file_path, device_id, as_root = False):
     '''
-    Get the integer timestamp value of a file from a given device.  Optionally, this 
+    Get the integer timestamp value of a file from a given device.  Optionally, this
     command can be run as super user, or 'as_root', which is disabled by default.
     '''
     timestamp_string = ''
-    device_sdk_version = adb_call('shell', 'getprop', 'ro.build.version.sdk', device = device_id)
-    if "\n" in device_sdk_version:
-        device_sdk_version = device_sdk_version[string.rfind(device_sdk_version, "\n"):]
 
-    # for devices running Android 5.1.1 or under, use the old 'ls' command for getting the file timestame
-    if int(device_sdk_version) <= 22:
-        ls_status, ls_output = adb_ls(args = [ '-l' ], path = remote_file_path, device_id = device_id, as_root = as_root)
-        if ls_status:
-            tgt_ls_fields = ls_output.split()
-            timestamp_string = '{} {}'.format(tgt_ls_fields[4], tgt_ls_fields[5])
-            Logs.debug('android_deploy: ls timestamp %s', timestamp_string)
+    ls_status, _ = adb_ls(args = [ '-l' ], path = remote_file_path, device_id = device_id, as_root = as_root)
+    if ls_status:
 
-    # otherwise for newer devices we can use the 'stat' command
-    else:
         adb_command = [ 'shell' ]
-
         if as_root:
             adb_command.extend([ 'su', '-c' ])
 
-        adb_command.extend([ 'stat', '-c', '%y', remote_file_path ])
+        cat_command = '"cat {}"'.format(remote_file_path)
+        adb_command.append(cat_command)
 
-        file_timestamp = adb_call(*adb_command, device = device_id)
-        if file_timestamp and 'No such file or directory' not in file_timestamp:
-            # strip the seconds and milliseconds from the time format from the stat command
-            timestamp_string = file_timestamp[:file_timestamp.rfind(':')]
-            Logs.debug('android_deploy: stat timestamp %s', timestamp_string)
+        file_contents = adb_call(*adb_command, device = device_id)
+        if file_contents:
+            timestamp_string = file_contents.strip()
 
     if timestamp_string:
-        target_time = time.mktime(time.strptime(timestamp_string, "%Y-%m-%d %H:%M"))
+        for fmt in ('%Y-%m-%d %H:%M:%S', '%Y-%m-%d %H:%M:%S.%f'):
+            try:
+                target_time = time.mktime(time.strptime(timestamp_string, fmt))
+                break
+            except:
+                target_time = 0
+
         Logs.debug('android_deploy: {} time is {}'.format(remote_file_path, target_time))
         return target_time
 
@@ -2156,45 +2312,65 @@ def get_device_file_timestamp(remote_file_path, device_id, as_root = False):
 def auto_detect_device_storage_path(device_id, log_warnings = False):
     '''
     Uses the device's environment variable "EXTERNAL_STORAGE" to determine the correct
-    path to public storage that has write permissions
+    path to public storage that has write permissions.  If at any point does the env var
+    validation fail, fallback to checking known possible paths to external storage.
     '''
     def _log_debug(message):
-        Logs.debug('adb_call: {}'.format(message))
+        Logs.debug('android_deploy: {}'.format(message))
 
     def _log_warn(message):
         Logs.warn('[WARN] {}'.format(message))
 
     log_func = _log_warn if log_warnings else _log_debug
 
+    def _check_known_paths():
+        external_storage_paths = [
+            '/sdcard/',
+            '/storage/emulated/0/',
+            '/storage/emulated/legacy/',
+            '/storage/sdcard0/',
+            '/storage/self/primary/',
+        ]
+        _log_debug('Falling back to search list of known external storage paths for device {}.'.format(device_id))
+
+        for path in external_storage_paths:
+            _log_debug('Searching {}'.format(path))
+            status, _ = adb_ls(path, device_id)
+            if status:
+                return path[:-1]
+        else:
+            log_func('Failed to detect a valid path with correct permissions for device {}'.format(device_id))
+            return ''
+
     external_storage = adb_call('shell', '"set | grep EXTERNAL_STORAGE"', device = device_id)
     if not external_storage:
-        log_func('Call to get the EXTERNAL_STORAGE environment variable from device {} failed.'.format(device_id))
-        return ''
+        _log_debug('Call to get the EXTERNAL_STORAGE environment variable from device {} failed.'.format(device_id))
+        return _check_known_paths()
 
     storage_path = external_storage.split('=')
     if len(storage_path) != 2:
-        log_func('Received bad data while attempting extract the EXTERNAL_STORAGE environment variable from device {}.'.format(device_id))
-        return ''
+        _log_debug('Received bad data while attempting extract the EXTERNAL_STORAGE environment variable from device {}.'.format(device_id))
+        return _check_known_paths()
 
     var_path = storage_path[1].strip()
     status, _ = adb_ls(var_path, device_id)
     if status:
         return var_path
-    else: 
-        Logs.debug('adb_call: The path specified in EXTERNAL_STORAGE seems to have permission issues, attempting to resolve with realpath for device {}.'.format(device_id))
+
+    _log_debug('The path specified in EXTERNAL_STORAGE seems to have permission issues, attempting to resolve with realpath for device {}.'.format(device_id))
 
     real_path = adb_call('shell', 'realpath', var_path, device = device_id)
     if not real_path:
-        log_func('Something happend while attempting to resolve the path from the EXTERNAL_STORAGE environment variable from device {}.'.format(device_id))
-        return ''
+        _log_debug('Something happened while attempting to resolve the path from the EXTERNAL_STORAGE environment variable for device {}.'.format(device_id))
+        return _check_known_paths()
 
     real_path = real_path.strip()
     status, _ = adb_ls(real_path, device_id)
     if status:
         return real_path
-    else:
-        log_func('Unable to validate the resolved EXTERNAL_STORAGE environment variable path from device {}.'.format(device_id))
-        return ''
+
+    _log_debug('Unable to validate the resolved EXTERNAL_STORAGE environment variable path for device {}.'.format(device_id))
+    return _check_known_paths()
 
 
 def construct_assets_path_for_game_project(ctx, game_project):
@@ -2204,40 +2380,13 @@ def construct_assets_path_for_game_project(ctx, game_project):
     return 'Android/data/{}/files'.format(ctx.get_android_package_name(game_project))
 
 
-def run_rc_job(ctx, job, source, target, game, assets_type, is_obb):
-    rc_path = get_resource_compiler_path(ctx)
-
-    command_args = [
-        '"{}"'.format(rc_path),
-        '/job={}'.format(os.path.join('Bin64', 'rc', job)),
-        '/p={}'.format(assets_type),
-        '/src="{}"'.format(source),
-        '/trg="{}"'.format(target),
-        '/threads={}'.format(ctx.options.max_cores),
-        '/game={}'.format(game.lower())
-    ]
-
-    if is_obb:
-        pacakge_name = ctx.get_android_package_name(game)
-        app_version_number = ctx.get_android_version_number(game)
-
-        command_args.extend([
-            '/obb_pak=main.{}.{}.obb'.format(app_version_number, pacakge_name),
-            '/obb_patch_pak=patch.{}.{}.obb'.format(app_version_number, pacakge_name)
-        ])
-
-    command = ' '.join(command_args)
-    Logs.debug('android_deploy: running RC command - {}'.format(command))
-    call(command, shell = True)
-
-
 def build_shader_paks(ctx, game, assets_type, layout_node, shaders_source_paths):
     pak_shaders_script = ctx.path.find_resource('Tools/PakShaders/pak_shaders.py')
     shaders_pak_dir = ctx.path.make_node("build/{}/{}".format(assets_type, game).lower())
     shaders_pak_dir.mkdir()
 
     command_args = [
-        get_python_path(ctx), 
+        get_python_path(ctx),
         '"{}"'.format(pak_shaders_script.abspath()),
         '"{}"'.format(shaders_pak_dir.abspath()),
         '-s'
@@ -2282,7 +2431,7 @@ def pack_assets_in_apk(ctx, executable_name, layout_node):
 
     android_cache = get_android_cache_node(ctx)
 
-    # create a copy of the existing barebones APK for the assets
+    # create a copy of the existing bare bones APK for the assets
     variant = getattr(ctx.__class__, 'variant', None)
     if not variant:
         (platform, configuration) = ctx.get_platform_and_configuration()
@@ -2294,14 +2443,14 @@ def pack_assets_in_apk(ctx, executable_name, layout_node):
     if not os.path.exists(barebones_apk_path):
         ctx.fatal('[ERROR] Unable to find the barebones APK in path {}.  Run the build command for {} again to generate it.'.format(barebones_apk_path, variant))
 
-    apk_cache_node = android_cache.make_node('apk')
+    apk_cache_node = android_cache.make_node(['apk', variant])
     apk_cache_node.mkdir()
 
     raw_apk_with_asset_node = apk_cache_node.make_node('{}_unaligned_unsigned{}.apk'.format(executable_name, APK_WITH_ASSETS_SUFFIX))
 
     shutil.copy2(barebones_apk_path, raw_apk_with_asset_node.abspath())
 
-    # We need to make the 'assets' junction in order to generate the correct pathing structure when adding 
+    # We need to make the 'assets' junction in order to generate the correct pathing structure when adding
     # files to an existing APK
     asset_dir = 'assets'
     asset_junction = android_cache.make_node(asset_dir)
@@ -2316,9 +2465,9 @@ def pack_assets_in_apk(ctx, executable_name, layout_node):
         ctx.fatal("[ERROR] Could not create junction for asset folder {}".format(layout_node.abspath()))
 
     # add the assets to the APK
-    command = command_buffer([ 
-        '"{}"'.format(ctx.env['AAPT']), 
-        'add', 
+    command = command_buffer([
+        '"{}"'.format(ctx.env['AAPT']),
+        'add',
         '"{}"'.format(raw_apk_with_asset_node.abspath())
     ])
     command_len_max = get_command_line_limit()
@@ -2395,120 +2544,140 @@ def adb_copy_task(self, android_device, src_node, output_target):
 
 
 ###############################################################################
+class DeployAndroidContext(Build.BuildContext):
+    fun = 'deploy'
+
+
+    def __init__(self, **kw):
+        super(DeployAndroidContext, self).__init__(**kw)
+
+        sdk_root = self.get_env_file_var('LY_ANDROID_SDK', required = True)
+
+        global ADB_QUOTED_PATH
+        ADB_QUOTED_PATH = '"{}"'.format(os.path.join(sdk_root, 'platform-tools', 'adb'))
+
+
+    def get_asset_deploy_mode(self):
+        if not hasattr(self, 'asset_deploy_mode'):
+            asset_deploy_mode = self.options.deploy_android_asset_mode.lower()
+
+            is_release = (self.env['CONFIGURATION'] == 'release')
+
+            if self.options.from_android_studio:
+                # force a mode where assets are not packed into the APK since android studio handles the APK generation
+                asset_deploy_mode = (ASSET_DEPLOY_PAKS if is_release else ASSET_DEPLOY_LOOSE)
+
+            elif is_release:
+                # force release mode to use the project's settings
+                asset_deploy_mode = ASSET_DEPLOY_PROJECT_SETTINGS
+
+            if asset_deploy_mode not in ASSET_DEPLOY_MODES:
+                bld.fatal('[ERROR] Unable to determine the asset deployment mode.  Valid options for --deploy-android-asset-mode are limited to: {}'.format(ASSET_DEPLOY_MODES))
+
+            self.asset_deploy_mode = asset_deploy_mode
+            setattr(self.options, 'deploy_android_asset_mode', asset_deploy_mode)
+
+        return self.asset_deploy_mode
+
+
+    def use_vfs(self):
+        if not hasattr(self, 'cached_use_vfs'):
+            self.cached_use_vfs = (self.get_bootstrap_vfs() == '1')
+        return self.cached_use_vfs
+
+
+    def use_obb(self):
+        if not hasattr(self, 'cached_use_obb'):
+            game = self.get_bootstrap_game()
+
+            use_main_obb = (self.get_android_use_main_obb(game).lower() == 'true')
+            use_patch_obb = (self.get_android_use_patch_obb(game).lower() == 'true')
+
+            self.cached_use_obb = (use_main_obb or use_patch_obb)
+
+        return self.cached_use_obb
+
+
+    def get_asset_cache_path(self):
+        if not hasattr(self, 'asset_cache_path'):
+            game = self.get_bootstrap_game()
+            assets = self.get_bootstrap_assets('android')
+            self.asset_cache_path = os.path.join('Cache', game, assets)
+
+        return self.asset_cache_path
+
+
+    def get_asset_cache(self):
+        if not hasattr(self, 'asset_cache'):
+            self.asset_cache = self.path.find_dir(self.get_asset_cache_path())
+
+        return self.asset_cache
+
+
+    def get_layout_node(self):
+        if not hasattr(self, 'android_layout_node'):
+            game = self.get_bootstrap_game()
+            asset_deploy_mode = self.get_asset_deploy_mode()
+
+            if asset_deploy_mode == ASSET_DEPLOY_LOOSE:
+                self.android_layout_node = self.get_asset_cache()
+
+            elif asset_deploy_mode == ASSET_DEPLOY_PAKS:
+                paks_cache = '{}_paks'.format(self.get_asset_cache_path())
+                self.android_layout_node = self.path.make_node(paks_cache)
+
+            elif asset_deploy_mode == ASSET_DEPLOY_PROJECT_SETTINGS:
+                cache_folder = '{}_{}'.format(self.get_asset_cache_path(), 'obb' if self.use_obb() else 'paks')
+                self.android_layout_node = self.path.make_node(cache_folder)
+
+        # just in case get_layout_node is called before deploy_android_asset_mode has been validated, which
+        # could mean android_layout_node never getting set
+        try:
+            return self.android_layout_node
+        except:
+            self.fatal('[ERROR] Unable to determine the asset layout node for Android.')
+
+
+    def user_message(self, message):
+        Logs.pprint('CYAN', '[INFO] {}'.format(message))
+
+
+    def log_error(self, message):
+        if self.options.from_editor_deploy or self.options.from_android_studio:
+            self.fatal(message)
+        else:
+            Logs.error(message)
+
+
 # create a deployment context for each build variant
 for configuration in ['debug', 'profile', 'release']:
     for target in ['android_armv7_gcc', 'android_armv7_clang', 'android_armv8_clang']:
         build_variant = '{}_{}'.format(target, configuration)
 
-        class DeployAndroidContext(Build.BuildContext):
-            fun = 'deploy'
-            variant = build_variant
+        package_context = type(
+            '{}_package_context'.format(build_variant),
+            (DeployAndroidContext,),
+            {
+                'cmd' : 'deploy_{}'.format(build_variant),
+                'variant' : build_variant,
+                'features' : ['deploy_android_prepare']
+            })
 
-
-            def get_asset_deploy_mode(self):
-                if not hasattr(self, 'asset_deploy_mode'):
-                    asset_deploy_mode = self.options.deploy_android_asset_mode.lower()
-
-                    configuration = self.env['CONFIGURATION']
-                    if configuration == 'release':
-                        # force release mode to use the project's settings
-                        asset_deploy_mode = ASSET_DEPLOY_PROJECT_SETTINGS
-
-                    if asset_deploy_mode not in ASSET_DEPLOY_MODES:
-                        bld.fatal('[ERROR] Unable to determine the asset deployment mode.  Valid options for --deploy-android-asset-mode are limited to: {}'.format(ASSET_DEPLOY_MODES))
-
-                    self.asset_deploy_mode = asset_deploy_mode
-                    setattr(self.options, 'deploy_android_asset_mode', asset_deploy_mode)
-
-                return self.asset_deploy_mode
-
-
-            def use_vfs(self):
-                if not hasattr(self, 'cached_use_vfs'):
-                    self.cached_use_vfs = (self.get_bootstrap_vfs() == '1')
-                return self.cached_use_vfs
-
-
-            def use_obb(self):
-                if not hasattr(self, 'cached_use_obb'):
-                    game = self.get_bootstrap_game()
-
-                    use_main_obb = (self.get_android_use_main_obb(game).lower() == 'true')
-                    use_patch_obb = (self.get_android_use_patch_obb(game).lower() == 'true')
-
-                    self.cached_use_obb = (use_main_obb or use_patch_obb)
-
-                return self.cached_use_obb
-
-
-            def get_asset_cache_path(self):
-                if not hasattr(self, 'asset_cache_path'):
-                    game = self.get_bootstrap_game()
-                    assets = self.get_bootstrap_assets("android").lower()
-
-                    self.asset_cache_path = "Cache/{}/{}".format(game, assets)
-
-                return self.asset_cache_path
-
-
-            def get_asset_cache(self):
-                if not hasattr(self, 'asset_cache'):
-                    self.asset_cache = self.path.find_dir(self.get_asset_cache_path())
-
-                return self.asset_cache
-
-
-            def get_layout_node(self):
-                if not hasattr(self, 'android_layout_node'):
-                    game = self.get_bootstrap_game()
-                    asset_deploy_mode = self.get_asset_deploy_mode()
-
-                    if asset_deploy_mode == ASSET_DEPLOY_LOOSE:
-                        self.android_layout_node = self.get_asset_cache()
-
-                    elif asset_deploy_mode == ASSET_DEPLOY_PAKS:
-                        self.android_layout_node = self.path.make_node('AndroidLayoutPak/{}'.format(game))
-
-                    elif asset_deploy_mode == ASSET_DEPLOY_PROJECT_SETTINGS:
-                        layout_folder_name = 'AndroidLayoutObb' if self.use_obb() else 'AndroidLayoutPak'
-                        self.android_layout_node = self.path.make_node('{}/{}'.format(layout_folder_name, game))
-
-                # just incase get_layout_node is called before deploy_android_asset_mode has been validated, which
-                # could mean android_layout_node never getting set
-                try:
-                    return self.android_layout_node
-                except:
-                    self.fatal('[ERROR] Unable to determine the asset layout node for Android.')
-
-
-            def user_message(self, message):
-                Logs.pprint('CYAN', '[INFO] {}'.format(message))
-
-
-            def log_error(self, message):
-                if self.options.from_editor_deploy:
-                    self.fatal(message)
-                else:
-                    Logs.error(message)
-
-
-        class DeployAndroid(DeployAndroidContext):
-            after = ['build_' + build_variant]
-            cmd = 'deploy_' + build_variant
-            features = ['deploy_android_prepare']
-
-
-        class DeployAndroidDevices(DeployAndroidContext):
-            after = ['deploy_' + build_variant]
-            cmd = 'deploy_devices_' + build_variant
-            features = ['deploy_android_devices']
+        deploy_context = type(
+            '{}_deploy_context'.format(build_variant),
+            (DeployAndroidContext,),
+            {
+                'cmd' : 'deploy_devices_{}'.format(build_variant),
+                'variant' : build_variant,
+                'features' : ['deploy_android_devices']
+            })
 
 
 @taskgen_method
 @feature('deploy_android_prepare')
 def prepare_to_deploy_android(tsk_gen):
     '''
-    Prepare the deploy process by generating the necessary asset layout 
+    Prepare the deploy process by generating the necessary asset layout
     directories, pak / obb files and packing assets in the APK if necessary.
     '''
 
@@ -2517,7 +2686,7 @@ def prepare_to_deploy_android(tsk_gen):
     configuration = bld.env['CONFIGURATION']
 
     # handle a few non-fatal early out cases
-    if not bld.is_android_platform(platform) or not bld.is_option_true('deploy_android') or bld.options.from_android_studio:
+    if not bld.is_android_platform(platform) or (not bld.is_option_true('deploy_android') and not bld.options.from_android_studio):
         bld.user_message('Skipping Android Deployment...')
         return
 
@@ -2525,17 +2694,21 @@ def prepare_to_deploy_android(tsk_gen):
     asset_deploy_mode = bld.get_asset_deploy_mode()
     Logs.debug('android_deploy: Using asset mode - {}'.format(asset_deploy_mode))
 
+    assets_platform = bld.get_bootstrap_assets('android')
+
     if bld.get_asset_cache() is None:
-        asset_dir = bld.get_asset_cache_path()
-        bld.log_error('[ERROR] There is no asset cache to read from at {}.  Please run AssetProcessor / AssetProcessorBatch from '
-                      'the Bin64vc120 / Bin64vc140 / BinMac64 directory with "es3" assets enabled in the AssetProcessorPlatformConfig.ini'.format(asset_dir))
+        assets_dir = bld.get_asset_cache_path()
+        output_folders = [ folder.name for folder in bld.get_standard_host_output_folders() ]
+
+        bld.log_error('[ERROR] There is no asset cache to read from at "{}". Please run AssetProcessor or '
+                      'AssetProcessorBatch from {} with "{}" assets enabled in the '
+                      'AssetProcessorPlatformConfig.ini'.format(assets_dir, '/'.join(output_folders), assets_platform))
         return
 
     game = bld.get_bootstrap_game()
     executable_name = bld.get_executable_name(game)
-    assets = bld.get_bootstrap_assets("android")
 
-    # attempt to get a list of connceted devices, they are only required for pulling the shaders in release mode
+    # attempt to get a list of connected devices, they are only required for pulling the shaders in release mode
     # if no devices are found, it will fail naturally when the shader paks can't be generated
     devices = []
     if adb_call('start-server') is not None:
@@ -2546,17 +2719,18 @@ def prepare_to_deploy_android(tsk_gen):
     # handle the asset pre-processing
     if (asset_deploy_mode == ASSET_DEPLOY_PAKS) or (asset_deploy_mode == ASSET_DEPLOY_PROJECT_SETTINGS):
         if bld.use_vfs():
-            bld.fatal('[ERROR] Cannot use VFS when the --deploy-android-asset-mode is set to "{}", please set remote_filesystem=0 in bootstrap.cfg'.format(asset_deploy_mode))
+            bld.fatal('[ERROR] Cannot use VFS when the --deploy-android-asset-mode is set to "{}".  Please set remote_filesystem=0 in bootstrap.cfg'.format(asset_deploy_mode))
 
         asset_cache = bld.get_asset_cache()
         layout_node = bld.get_layout_node()
 
         # generate the pak/obb files
         is_obb = (asset_deploy_mode == ASSET_DEPLOY_PROJECT_SETTINGS) and bld.use_obb()
-        rc_job = bld.get_android_rc_obb_job(game) if is_obb else bld.get_android_rc_pak_job(game)
+        rc_job_file = bld.get_android_rc_obb_job(game) if is_obb else bld.get_android_rc_pak_job(game)
+        rc_job = os.path.join('Bin64', 'rc', rc_job_file)
 
         bld.user_message('Generating the necessary pak files...')
-        run_rc_job(bld, rc_job, asset_cache.relpath(), layout_node.relpath(), game, assets, is_obb)
+        run_rc_job(bld, game, rc_job, assets_platform, asset_cache.relpath(), layout_node.relpath(), is_obb)
 
         # handles the shaders
         if asset_deploy_mode == ASSET_DEPLOY_PROJECT_SETTINGS:
@@ -2567,7 +2741,7 @@ def prepare_to_deploy_android(tsk_gen):
             if layout_node.find_resource(shadercachestartup_pak) and layout_node.find_resource(shaderscache_pak):
                 bld.user_message('Using found shaders paks in the layout folder - {}'.format(layout_node.relpath()))
 
-            else: 
+            else:
                 bld.user_message('Searching for cached shaders locally and on connected devices...')
 
                 shader_types = [ 'gles3_0', 'gles3_1' ]
@@ -2586,7 +2760,7 @@ def prepare_to_deploy_android(tsk_gen):
 
                     # pull the shaders
                     else:
-                        pull_shaders_folder = bld.path.make_node("build/temp/{}/{}/{}".format(assets, game, shader_flavor).lower())
+                        pull_shaders_folder = bld.path.make_node([ 'build' , 'temp', assets_platform, game.lower(), shader_flavor ])
                         pull_shaders_folder.mkdir()
 
                         if os.path.exists(pull_shaders_folder.abspath()):
@@ -2607,8 +2781,8 @@ def prepare_to_deploy_android(tsk_gen):
 
                             command = [
                                 'pull',
-                                device_folder, 
-                                '"{}"'.format(pull_shaders_folder.abspath()), 
+                                device_folder,
+                                '"{}"'.format(pull_shaders_folder.abspath()),
                             ]
 
                             adb_call(*command, device = android_device)
@@ -2626,7 +2800,7 @@ def prepare_to_deploy_android(tsk_gen):
 
                 if shaders_source_paths:
                     bld.user_message('Generating the shader pak files...')
-                    build_shader_paks(bld, game, assets, layout_node, shaders_source_paths)
+                    build_shader_paks(bld, game, assets_platform, layout_node, shaders_source_paths)
 
             # get the keystore passwords
             set_key_and_store_pass(bld)
@@ -2683,36 +2857,40 @@ def deploy_to_devices(tsk_gen):
 
     asset_deploy_mode = bld.get_asset_deploy_mode()
 
-    # get location of APK either from command line option or default build location
-    if Options.options.apk_path == '':
-        suffix = ''
-        if asset_deploy_mode == ASSET_DEPLOY_PROJECT_SETTINGS:
-            suffix = APK_WITH_ASSETS_SUFFIX
+    # create the path to the APK
+    suffix = ''
+    if asset_deploy_mode == ASSET_DEPLOY_PROJECT_SETTINGS:
+        suffix = APK_WITH_ASSETS_SUFFIX
 
-        output_folder = bld.get_output_folders(platform, configuration)[0]
-        apk_name = '{}/{}{}.apk'.format(output_folder.abspath(), executable_name, suffix)
-    else:
-        apk_name = Options.options.apk_path
+    output_folder = bld.get_output_folders(platform, configuration)[0]
+    apk_name = '{}/{}{}.apk'.format(output_folder.abspath(), executable_name, suffix)
 
     layout_node = bld.get_layout_node()
 
     do_clean = bld.is_option_true('deploy_android_clean_device')
-    deploy_executable = bld.is_option_true('deploy_android_executable')
-    deploy_assets = (asset_deploy_mode == ASSET_DEPLOY_LOOSE) or (asset_deploy_mode == ASSET_DEPLOY_PAKS)
+    deploy_executable = bld.is_option_true('deploy_android_executable') and not bld.options.from_android_studio
 
-    # no sense in pushing the assets if we are cleaning the device and not reinstalling the APK
-    if do_clean and not deploy_executable:
+    if bld.use_vfs():
+        if asset_deploy_mode == ASSET_DEPLOY_LOOSE:
+            deploy_assets = True
+        else:
+            # this is already checked in the prepare stage, but just to be safe...
+            bld.fatal('[ERROR] Cannot use VFS when the --deploy-android-asset-mode is set to "{}".  Please set remote_filesystem=0 in bootstrap.cfg'.format(asset_deploy_mode))
+    else:
+        deploy_assets = asset_deploy_mode in (ASSET_DEPLOY_LOOSE, ASSET_DEPLOY_PAKS)
+
+    # no sense in pushing the assets if we are cleaning the device and not reinstalling the APK from normal command line
+    if do_clean and not deploy_executable and not bld.options.from_android_studio:
         deploy_assets = False
 
     Logs.debug('android_deploy: deploy options: do_clean {}, deploy_exec {}, deploy_assets {}'.format(do_clean, deploy_executable, deploy_assets))
 
-    # Some checkings before we start the deploy process.
     if deploy_executable and not os.path.exists(apk_name):
         bld.fatal('[ERROR] Could not find the Android executable (APK) in path - {} - necessary for deployment.  Run the build command for {}_{} to generate it'.format(apk_name, platform, configuration))
         return
 
 
-    deploy_libs = bld.options.deploy_android_attempt_libs_only and not (do_clean or bld.options.from_editor_deploy) and not (asset_deploy_mode == ASSET_DEPLOY_PROJECT_SETTINGS)
+    deploy_libs = bld.options.deploy_android_attempt_libs_only and not (do_clean or bld.options.from_editor_deploy or bld.options.from_android_studio) and not (asset_deploy_mode == ASSET_DEPLOY_PROJECT_SETTINGS)
     Logs.debug('android_deploy: The option to attempt library only deploy is %s', 'ENABLED' if deploy_libs else 'DISABLED')
 
     variant = '{}_{}'.format(platform, configuration)
@@ -2720,14 +2898,15 @@ def deploy_to_devices(tsk_gen):
     apk_builder_node = bld.get_bintemp_folder_node().make_node(apk_builder_path)
 
     abi_func = getattr(bld, 'get_%s_target_abi' % platform, None)
-    lib_paths = ['lib'] + [ abi_func() ] if abi_func else [] # since we don't support 'fat' apks it's ok to not have the abi specifier but it's still perferred
+    lib_paths = ['lib'] + [ abi_func() ] if abi_func else [] # since we don't support 'fat' apks it's ok to not have the abi specifier but it's still preferred
     stripped_libs_node = apk_builder_node.make_node(lib_paths)
 
     game_package = bld.get_android_package_name(game)
     device_install_path = '/data/data/{}'.format(game_package)
 
-    apk_stat = os.stat(apk_name)
-    apk_size = apk_stat.st_size
+    if deploy_libs:
+        apk_stat = os.stat(apk_name)
+        apk_size = apk_stat.st_size
 
 
     relative_assets_path = construct_assets_path_for_game_project(bld, game)
@@ -2736,13 +2915,27 @@ def deploy_to_devices(tsk_gen):
     # will get the timestamp of the file off the device and compare that with
     # asset files on the host machine to determine if the host machine asset
     # file is newer than what the device has, and if so copy it to the device.
-    timestamp_file_name = 'engineroot.txt'
-    host_timestamp_file = bld.path.find_node(timestamp_file_name)
+    timestamp_file_name = 'deploy.timestamp'
 
     deploy_count = 0
 
-    devices = get_list_of_android_devices()
-    for android_device in devices:
+    connected_devices = get_list_of_android_devices()
+    target_devices = []
+
+    device_filter = bld.options.deploy_android_device_filter
+    if not device_filter:
+        target_devices = connected_devices
+
+    else:
+        device_list = device_filter.split(',')
+        for device_id in device_list:
+            device_id = device_id.strip()
+            if device_id not in connected_devices:
+                Logs.warn('[WARN] Android device ID - {} - in device filter not detected as connected'.format(device_id))
+            else:
+                target_devices.append(device_id)
+
+    for android_device in target_devices:
         bld.user_message('Starting to deploy to android device ' + android_device)
 
         storage_path = auto_detect_device_storage_path(android_device, log_warnings = True)
@@ -2792,7 +2985,7 @@ def deploy_to_devices(tsk_gen):
                 if install_check:
                     target_time = get_device_file_timestamp(device_lib_timestamp_file, android_device, True)
 
-                    # cases for early out infavor of re-installing the APK:
+                    # cases for early out in favor of re-installing the APK:
                     #       If target_time is zero, the file wasn't found which would indicate we haven't attempt to push just the libs before
                     #       The dalvik executable is newer than the last time we deployed to this device
                     if target_time == 0 or should_copy_file(apk_builder_node.make_node('classes.dex'), target_time):
@@ -2830,9 +3023,7 @@ def deploy_to_devices(tsk_gen):
 
                             deploy_executable = False
 
-                # update the timestamp file
-                adb_root_push_func(host_timestamp_file, device_lib_timestamp_file, android_device)
-                adb_call('shell', 'su', '-c', 'touch', device_lib_timestamp_file, device = android_device)
+                update_device_file_timestamp(device_lib_timestamp_file, android_device, as_root = True)
 
                 # clean up the staging directory
                 if access_type == ACCESS_SHELL_SU:
@@ -2857,39 +3048,53 @@ def deploy_to_devices(tsk_gen):
                 continue
 
         if deploy_assets:
-            target_time = get_device_file_timestamp(device_timestamp_file, android_device)
 
-            if do_clean or target_time == 0:
-                bld.user_message('Copying all assets to the device {}. This may take some time...'.format(android_device))
+            if bld.use_vfs():
+                files_to_transfer = [
+                    'bootstrap.cfg',
+                    '{}/config/game.xml'.format(game).lower()
+                ]
 
-                # There is a chance that if someone ran VFS before this deploy on an empty directory the output_target directory will have
-                # already existed when we do the push command. In this case if we execute adb push command it will create an ES3 directory
-                # and put everything there, causing the deploy to be 'successful' but the game will crash as it won't be able to find the
-                # assets. Since we detected a "clean" build, wipe out the output_target folder if it exists first then do the push and
-                # everything will be just fine.
-                ls_status, _ = adb_ls(output_target, android_device)
-                if ls_status:
-                    adb_call('shell', 'rm', '-rf', output_target)
+                for file in files_to_transfer:
+                    local_node = layout_node.find_resource(file)
+                    if not local_node:
+                        bld.fatal('[ERROR] Failed to locate file {} in path {}'.format(os.path.normpath(file), layout_node.abspath()))
 
-                push_status = adb_call('push', '"{}"'.format(layout_node.abspath()), output_target, device = android_device)
-                if not push_status:
-                    # Clean up any files we may have pushed to make the next run success rate better
-                    adb_call('shell', 'rm', '-rf', output_target, device = android_device)
-                    bld.fatal('[ERROR] The ABD command to push all the files to the device failed.')
-                    continue
+                    target_file = '{}/{}'.format(output_target, file)
+                    tsk_gen.adb_copy_task(android_device, local_node, target_file)
 
             else:
-                layout_files = layout_node.ant_glob('**/*')
-                bld.user_message('Scanning {} files to determine which ones need to be copied...'.format(len(layout_files)))
-                for src_file in layout_files:
-                    # Faster to check if we should copy now rather than in the copy_task
-                    if should_copy_file(src_file, target_time):
-                        final_target_dir = '{}/{}'.format(output_target, string.replace(src_file.path_from(layout_node), '\\', '/'))
-                        tsk_gen.adb_copy_task(android_device, src_file, final_target_dir)
+                target_time = get_device_file_timestamp(device_timestamp_file, android_device)
 
-                # Push the timestamp_file_name last so that it has a timestamp that we can use on the next deploy to know which files to
-                # upload to the device
-                adb_call('push', '"{}"'.format(host_timestamp_file.abspath()), device_timestamp_file, device = android_device)
+                if do_clean or target_time == 0:
+                    bld.user_message('Copying all assets to the device {}. This may take some time...'.format(android_device))
+
+                    # There is a chance that if someone ran VFS before this deploy on an empty directory the output_target directory will have
+                    # already existed when we do the push command. In this case if we execute adb push command it will create an ES3 directory
+                    # and put everything there, causing the deploy to be 'successful' but the game will crash as it won't be able to find the
+                    # assets. Since we detected a "clean" build, wipe out the output_target folder if it exists first then do the push and
+                    # everything will be just fine.
+                    ls_status, _ = adb_ls(output_target, android_device)
+                    if ls_status:
+                        adb_call('shell', 'rm', '-rf', output_target)
+
+                    push_status = adb_call('push', '"{}"'.format(layout_node.abspath()), output_target, device = android_device)
+                    if not push_status:
+                        # Clean up any files we may have pushed to make the next run success rate better
+                        adb_call('shell', 'rm', '-rf', output_target, device = android_device)
+                        bld.fatal('[ERROR] The ABD command to push all the files to the device failed.')
+                        continue
+
+                else:
+                    layout_files = layout_node.ant_glob('**/*')
+                    bld.user_message('Scanning {} files to determine which ones need to be copied...'.format(len(layout_files)))
+                    for src_file in layout_files:
+                        # Faster to check if we should copy now rather than in the copy_task
+                        if should_copy_file(src_file, target_time):
+                            final_target_dir = '{}/{}'.format(output_target, string.replace(src_file.path_from(layout_node), '\\', '/'))
+                            tsk_gen.adb_copy_task(android_device, src_file, final_target_dir)
+
+                update_device_file_timestamp(device_timestamp_file, android_device)
 
         deploy_count = deploy_count + 1
 

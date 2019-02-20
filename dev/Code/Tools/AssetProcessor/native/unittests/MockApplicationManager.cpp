@@ -9,8 +9,6 @@
 *WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 *
 */
-#if defined (UNIT_TEST)
-
 #include <QElapsedTimer>
 #include <QCoreApplication>
 
@@ -137,6 +135,7 @@ namespace AssetProcessor
         builderDesc.m_name = builderName.toUtf8().data();
         builderDesc.m_patterns = builderPatterns;
         builderDesc.m_busId = AZ::Uuid::CreateString(builderId.toUtf8().data());
+        builderDesc.m_builderType = AssetBuilderSDK::AssetBuilderDesc::AssetBuilderType::Internal;
         builderDesc.m_createJobFunction = AZStd::bind(&InternalMockBuilder::CreateJobs, this, AZStd::placeholders::_1, AZStd::placeholders::_2);
         builderDesc.m_processJobFunction = AZStd::bind(&InternalMockBuilder::ProcessJob, this, AZStd::placeholders::_1, AZStd::placeholders::_2);
         return builderDesc;
@@ -383,5 +382,3 @@ namespace AssetProcessor
     }
 
 }
-
-#endif // UNIT_TEST

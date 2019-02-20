@@ -2,7 +2,7 @@
 import { Http } from '@angular/http';
 import { AwsService } from "app/aws/aws.service";
 import { Measurable, TackableStatus } from 'app/view/game/module/cloudgems/class/index';
-import { Observable } from 'rxjs/rx';
+import { Observable } from 'rxjs/Observable'
 import { LyMetricService } from 'app/shared/service/index';
 
 /**
@@ -61,12 +61,24 @@ export class SpeechToTextApi extends ApiHandler {
         return super.delete("admin/bot/" + name);
     }
 
+    public deleteBotVersion(name, version): Observable<any> {
+        return super.delete("admin/bot/version/" + name + "/" + version);
+    }
+
     public deleteIntent(name): Observable<any> {
         return super.delete("admin/intent/" + name);
     }
 
+    public deleteIntentVersion(name, version): Observable<any> {
+        return super.delete("admin/intent/version/" + name + "/" + version);
+    }
+
     public deleteSlotType(name): Observable<any> {
         return super.delete("admin/slottype/" + name);
+    }
+
+    public deleteSlotTypeVersion(name, version): Observable<any> {
+        return super.delete("admin/slottype/version/" + name + "/" + version);
     }
 
     public getBot(name, version): Observable<any> {

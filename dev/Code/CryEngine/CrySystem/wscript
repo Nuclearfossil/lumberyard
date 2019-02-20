@@ -15,8 +15,7 @@
 
 def build(bld):
 
-    bld.CryEngineModule(
-
+    kw = dict(
         # Settings
         target                  = 'CrySystem',
         vs_filter               = 'CryEngine',
@@ -25,10 +24,10 @@ def build(bld):
         platforms               = ['all'],
         configurations          = ['all'],
         pch                     = 'StdAfx.cpp',
-        defines                 = ['ENGINE_EXPORTS'],
         use                     = ['AzFramework',
                                    'GridMate',
-                                   'CrashHandler'],
+                                   'CrashHandler',
+                                   'RemoteConsoleCore'],
         uselib                  = ['LZ4',
                                    'TIFF',
                                    'TOMCRYPT',
@@ -36,42 +35,35 @@ def build(bld):
                                    'EXPAT',
                                    'ZLIB',
                                    'MD5'],
-        includes                = [ bld.Path('Code/SDKs'),
-                                    bld.Path('Code/Tools/GemRegistry/include') ],
-        libpath                 = [ bld.Path('Code/SDKs') ],
+        includes                = [bld.Path('Code/Tools/GemRegistry/include') ],
         features                = ['link_running_program'],
+        defines                 = ['ENGINE_EXPORTS', 'USE_CRY_NEW_AND_DELETE'],
 
         # Platform Specific
         win_defines             = ['EXCLUDE_CINEMIZER_SDK'],
         win_file_list           = 'platformos_pc.waf_files',
         win_linkflags           = '/NODEFAULTLIB:libcmt.lib',
-        win_cxxflags            = '/EHsc',
         win_lib                 = ['wininet', 'Shell32', 'Ole32', 'Gdi32', 'ws2_32'],
-        
+
         darwin_file_list        = 'platformos_pc.waf_files',
         darwin_lib              = ['ncurses'],
 
         linux_file_list         = 'platformos_pc.waf_files',
         linux_lib               = [ 'tomcrypt', 'tommath', 'm' ],
 
-       
-       
-
-       
-       
-       
+        restricted_script       = 'update_restricted_parameters',
 
         android_file_list       = [ 'platformos_pc.waf_files', 'autodetect_android.waf_files' ],
-        android_includes        = [bld.Path('/Code/CryEngine/CrySystem/JobManager'),
-                                   bld.Path('/Code/CryEngine/CrySystem/XML/Expat'),
-                                   bld.Path('/Code/CryEngine/RenderDll/XRenderD3D9') ],
 
         ios_file_list           = [ 'platformos_pc.waf_files', 'autodetect_ios.waf_files' ],
 
         appletv_file_list       = 'platformos_pc.waf_files',
 
+        win_x64_clang_cxxflags  = ['-Wno-deprecated-declarations'],
+
         # Testing
         test_all_file_list      = ['crysystem_test.waf_files'],
     )
-
-
+    for p in bld.env['RESTRICTED_PLATFORMS']:
+        kw['{}_file_list'.format(p)] = ['{0}/platformos_{0}.waf_files'.format(p)]
+    bld.CryEngineModule(**kw)

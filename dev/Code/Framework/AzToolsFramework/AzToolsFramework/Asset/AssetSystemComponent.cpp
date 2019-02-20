@@ -80,13 +80,16 @@ namespace AzToolsFramework
                 });
             }
 
+            AssetSystemBus::AllowFunctionQueuing(true);
             AssetSystemRequestBus::Handler::BusConnect();
             AssetSystemJobRequestBus::Handler::BusConnect();
             AzToolsFramework::ToolsAssetSystemBus::Handler::BusConnect();
+            AZ::SystemTickBus::Handler::BusConnect();
         }
 
         void AssetSystemComponent::Deactivate()
         {
+            AZ::SystemTickBus::Handler::BusDisconnect();
             AzToolsFramework::ToolsAssetSystemBus::Handler::BusDisconnect();
             AssetSystemJobRequestBus::Handler::BusDisconnect();
             AssetSystemRequestBus::Handler::BusDisconnect();
@@ -98,6 +101,7 @@ namespace AzToolsFramework
                 socketConn->RemoveMessageHandler(AZ_CRC("AssetProcessorManager::SourceFileNotification", 0x8bfc4d1c), m_cbHandle);
             }
 
+            AssetSystemBus::AllowFunctionQueuing(false);
             AssetSystemBus::ClearQueuedEvents();
         }
 
@@ -109,10 +113,14 @@ namespace AzToolsFramework
             // Requests
             AssetJobsInfoRequest::Reflect(context);
             AssetJobLogRequest::Reflect(context);
+            GetScanFoldersRequest::Reflect(context);
+            GetAssetSafeFoldersRequest::Reflect(context);
 
             // Responses
             AssetJobsInfoResponse::Reflect(context);
             AssetJobLogResponse::Reflect(context);
+            GetScanFoldersResponse::Reflect(context);
+            GetAssetSafeFoldersResponse::Reflect(context);
 
             //JobInfo
             AzToolsFramework::AssetSystem::JobInfo::Reflect(context);
@@ -122,7 +130,7 @@ namespace AzToolsFramework
             if (serialize)
             {
                 serialize->Class<AssetSystemComponent, AZ::Component>()
-                    ->SerializerForEmptyClass();
+                    ;
             }
         }
 
@@ -222,7 +230,7 @@ namespace AzToolsFramework
             return "";
         }
 
-        void AssetSystemComponent::UpdateQueuedEvents()
+        void AssetSystemComponent::OnSystemTick()
         {
             AssetSystemBus::ExecuteQueuedEvents();
         }
@@ -287,7 +295,7 @@ namespace AzToolsFramework
 
             if (!SendRequest(request, response))
             {
-                AZ_Error("Editor", false, "Failed to send GetSourceInfoBySourceUUID request for uuid: ", sourceUuid.ToString<AZ::OSString>().c_str());
+                AZ_Error("Editor", false, "Failed to send GetSourceInfoBySourceUUID request for uuid: %s", sourceUuid.ToString<AZ::OSString>().c_str());
                 return false;
             }
 
@@ -297,6 +305,48 @@ namespace AzToolsFramework
                 watchFolder = response.m_rootFolder;
             }
             return response.m_found;
+        }
+
+        bool AssetSystemComponent::GetScanFolders(AZStd::vector<AZStd::string>& scanFolders)
+        {
+            AzFramework::SocketConnection* engineConnection = AzFramework::SocketConnection::GetInstance();
+            if (!engineConnection || !engineConnection->IsConnected())
+            {
+                return false;
+            }
+
+            GetScanFoldersRequest request;
+            GetScanFoldersResponse response;
+
+            if (!SendRequest(request, response))
+            {
+                AZ_Error("Editor", false, "Failed to send GetScanFolders request");
+                return false;
+            }
+
+            scanFolders.insert(scanFolders.end(), response.m_scanFolders.begin(), response.m_scanFolders.end());
+            return !response.m_scanFolders.empty();
+        }
+
+        bool AssetSystemComponent::GetAssetSafeFolders(AZStd::vector<AZStd::string>& assetSafeFolders)
+        {
+            AzFramework::SocketConnection* engineConnection = AzFramework::SocketConnection::GetInstance();
+            if (!engineConnection || !engineConnection->IsConnected())
+            {
+                return false;
+            }
+
+            GetAssetSafeFoldersRequest request;
+            GetAssetSafeFoldersResponse response;
+
+            if (!SendRequest(request, response))
+            {
+                AZ_Error("Editor", false, "Failed to send GetScanFolders request");
+                return false;
+            }
+
+            assetSafeFolders.insert(assetSafeFolders.end(), response.m_assetSafeFolders.begin(), response.m_assetSafeFolders.end());
+            return !response.m_assetSafeFolders.empty();
         }
 
         AZ::Outcome<AssetSystem::JobInfoContainer> AssetSystemComponent::GetAssetJobsInfo(const AZStd::string& path, const bool escalateJobs)

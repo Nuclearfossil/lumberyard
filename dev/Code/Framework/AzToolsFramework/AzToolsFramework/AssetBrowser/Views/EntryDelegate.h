@@ -15,7 +15,6 @@
 #include <AzCore/std/function/function_fwd.h>
 #include <AzToolsFramework/Thumbnails/Thumbnail.h>
 #include <QStyledItemDelegate>
-#include <QPointer>
 
 class QWidget;
 class QPainter;
@@ -37,7 +36,7 @@ namespace AzToolsFramework
             explicit EntryDelegate(QWidget* parent = nullptr);
             ~EntryDelegate() override;
 
-            QSize sizeHint(const QStyleOptionViewItem &option, const QModelIndex &index) const override;
+            QSize sizeHint(const QStyleOptionViewItem& option, const QModelIndex& index) const override;
             void paint(QPainter* painter, const QStyleOptionViewItem& option, const QModelIndex& index) const override;
             //! Set location where thumbnails are located for this instance of asset browser
             void SetThumbnailContext(const char* thumbnailContext);
@@ -45,18 +44,11 @@ namespace AzToolsFramework
             void SetShowSourceControlIcons(bool showSourceControl);
 
         protected:
-            //! Distance between UI elements 
-            static const int SPACING_PIXELS;
-            //! Left and right margins
-            static const int MARGIN_PIXELS;
-
             int m_iconSize;
             AZStd::string m_thumbnailContext;
             bool m_showSourceControl = false;
             //! Draw a thumbnail and return its width
             int DrawThumbnail(QPainter* painter, const QPoint& point, const QSize& size, Thumbnailer::SharedThumbnailKey thumbnailKey) const;
-            //! Draw text (culled by maxWidth) and return its width
-            int DrawText(QPainter* painter, const QPoint& point, int maxWidth, const char* text) const;
         };
     } // namespace AssetBrowser
 } // namespace AzToolsFramework

@@ -29,9 +29,9 @@ namespace RenderCapabilities
         return false;
     }
 
-    bool SupportsFrameBufferFetches()
+    FrameBufferFetchMask GetFrameBufferFetchCapabilities()
     {
-        return false;
+        return FrameBufferFetchMask();
     }
 
     bool SupportsDualSourceBlending()
@@ -45,6 +45,11 @@ namespace RenderCapabilities
     }
 
     bool SupportsStructuredBuffer(EShaderStage stage)
+    {
+        return true;
+    }
+
+    bool SupportsIndependentBlending()
     {
         return true;
     }

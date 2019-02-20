@@ -56,6 +56,7 @@ namespace AzToolsFramework
             void Init() override;
             void Activate() override;
             void Deactivate() override;
+            const AZ::TypeId& GetUnderlyingComponentType() const override;
             //////////////////////////////////////////////////////////////////////////
 
             //////////////////////////////////////////////////////////////////////////
@@ -64,8 +65,9 @@ namespace AzToolsFramework
             //////////////////////////////////////////////////////////////////////////
 
             void BuildGameEntity(AZ::Entity* gameEntity) override;
-            void FinishedBuildingGameEntity(AZ::Entity* gameEntity) override;
             void SetPrimaryAsset(const AZ::Data::AssetId& assetId) override;
+
+            AZ::ComponentValidationResult ValidateComponentRequirements(const AZ::ImmutableEntityVector& /*sliceEntities*/) const override;
 
             AZ::Component* GetTemplate() const { return m_template; }
 

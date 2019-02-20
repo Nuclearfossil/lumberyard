@@ -9,7 +9,8 @@
 * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 *
 */
-#include "StdAfx.h"
+
+#include "stdafx.h"
 
 #include "ComponentEntityObject.h"
 #include "IIconManager.h"
@@ -20,12 +21,12 @@
 #include <AzCore/Serialization/Utils.h>
 #include <AzCore/std/string/string.h>
 #include <AzCore/Math/Transform.h>
-#include <AzCore/Math/Quaternion.h>
 #include <AzCore/Slice/SliceComponent.h>
 
 #include <AzFramework/Entity/EntityContextBus.h>
-
+#include <AzToolsFramework/API/ComponentEntitySelectionBus.h>
 #include <AzToolsFramework/Entity/EditorEntityContextBus.h>
+#include <AzToolsFramework/Metrics/LyEditorMetricsBus.h>
 #include <AzToolsFramework/ToolsComponents/EditorLockComponent.h>
 #include <AzToolsFramework/ToolsComponents/EditorVisibilityComponent.h>
 #include <AzToolsFramework/ToolsComponents/SelectionComponent.h>
@@ -34,23 +35,21 @@
 #include <AzToolsFramework/ToolsComponents/EditorSelectionAccentSystemComponent.h>
 #include <AzToolsFramework/ToolsComponents/EditorEntityIconComponentBus.h>
 
+#include <LmbrCentral/Physics/CryPhysicsComponentRequestBus.h>
 #include <LmbrCentral/Rendering/RenderNodeBus.h>
 #include <LmbrCentral/Rendering/MeshComponentBus.h>
 #include <LmbrCentral/Rendering/MaterialOwnerBus.h>
 
 #include <MathConversion.h>
 
-#include <TrackView/TrackViewSequenceManager.h>
 #include <TrackView/TrackViewAnimNode.h>
 
 #include <IDisplayViewport.h>
 #include <Viewport.h>
 
-#include <HyperGraph/FlowGraphHelpers.h>
 #include <Material/MaterialManager.h>
 #include <Objects/ObjectLayer.h>
-
-#include <AzToolsFramework/Metrics/LyEditorMetricsBus.h>
+#include <Objects/StatObjValidator.h>
 
 /**
  * Scalars for icon drawing behavior.
@@ -121,6 +120,15 @@ void CComponentEntityObject::AssignEntity(AZ::Entity* entity, bool destroyOld)
     if (entity)
     {
         m_entityId = entity->GetId();
+
+        // Use the entity id to generate a GUID for this CEO because we need it to stay consistent for systems that register by GUID such as undo/redo since our own undo/redo system constantly recreates CEOs
+        GUID entityBasedGUID;
+        entityBasedGUID.Data1 = 0;
+        entityBasedGUID.Data2 = 0;
+        entityBasedGUID.Data3 = 0;
+        static_assert(sizeof(m_entityId) >= sizeof(entityBasedGUID.Data4), "The data contained in entity Id should fit inside Data4, if not switch to some other method of conversion to GUID");
+        memcpy(&entityBasedGUID.Data4, &m_entityId, sizeof(entityBasedGUID.Data4));
+        GetObjectManager()->ChangeObjectId(GetId(), entityBasedGUID);
 
         // Synchronize sandbox name to new entity's name.
         {
@@ -225,6 +233,18 @@ void CComponentEntityObject::SetSelected(bool bSelect)
             EBUS_EVENT(AzToolsFramework::ToolsApplicationRequests::Bus, MarkEntityDeselected, m_entityId);
         }
     }
+
+    AzToolsFramework::EntityIdList entities;
+    AzToolsFramework::ToolsApplicationRequestBus::BroadcastResult(entities, &AzToolsFramework::ToolsApplicationRequests::GetSelectedEntities);
+
+    if (entities.size() == 0)
+    {
+        GetIEditor()->Notify(eNotify_OnEntitiesDeselected);
+    }
+    else
+    {
+        GetIEditor()->Notify(eNotify_OnEntitiesSelected);
+    }
 }
 
 void CComponentEntityObject::SetHighlight(bool bHighlight)
@@ -249,6 +269,22 @@ IRenderNode* CComponentEntityObject::GetEngineNode() const
     return nullptr;
 }
 
+IPhysicalEntity* CComponentEntityObject::GetCollisionEntity() const
+{
+    IPhysicalEntity* result = nullptr;
+
+    LmbrCentral::CryPhysicsComponentRequestBus::EventResult(
+        result,
+        m_entityId,
+        &LmbrCentral::CryPhysicsComponentRequestBus::Events::GetPhysicalEntity);
+
+    if (result == nullptr)
+    {
+        result = CEntityObject::GetCollisionEntity();
+    }
+    return result;
+}
+
 void CComponentEntityObject::OnEntityNameChanged(const AZStd::string& name)
 {
     if (m_nameReentryGuard)
@@ -267,17 +303,17 @@ void CComponentEntityObject::OnSelected()
     {
         EditorActionScope selectionChange(m_selectionReentryGuard);
 
+        // Invoked when selected via tools application, so we notify sandbox.
+        const bool wasSelected = IsSelected();
+        GetIEditor()->GetObjectManager()->SelectObject(this);
+
         // If we get here and we're not already selected in sandbox land it means
         // the selection started in AZ land and we need to clear any edit tool
         // the user may have selected from the rollup bar
-        if (GetIEditor()->GetEditTool() && !IsSelected())
+        if (GetIEditor()->GetEditTool() && !wasSelected)
         {
             GetIEditor()->SetEditTool(0);
         }
-
-
-        // Invoked when selected via tools application, so we notify sandbox.
-        GetIEditor()->GetObjectManager()->SelectObject(this);
     }
 }
 
@@ -455,6 +491,7 @@ void CComponentEntityObject::OnMeshCreated(const AZ::Data::Asset<AZ::Data::Asset
 
     // Need to recalculate bounds when the mesh changes.
     OnBoundsReset();
+    ValidateMeshStatObject();
 }
 
 void CComponentEntityObject::OnBoundsReset()
@@ -466,6 +503,8 @@ void CComponentEntityObject::OnBoundsReset()
 void CComponentEntityObject::SetSandboxObjectAccent(AzToolsFramework::EntityAccentType accent)
 {
     m_accentType = accent;
+    AzToolsFramework::EditorComponentSelectionNotificationsBus::Event(m_entityId,
+        &AzToolsFramework::EditorComponentSelectionNotificationsBus::Events::OnAccentTypeChanged, m_accentType);
 }
 
 void CComponentEntityObject::SetSandBoxObjectIsolated(bool isIsolated)
@@ -722,35 +761,42 @@ bool CComponentEntityObject::HitTest(HitContext& hc)
             Vec3 hitPos;
             if (Intersect::Ray_AABB(Ray(hc.raySrc, hc.rayDir), bounds, hitPos))
             {
-                IStatObj* geometry = nullptr;
-                EBUS_EVENT_ID_RESULT(geometry, m_entityId, LmbrCentral::LegacyMeshComponentRequestBus, GetStatObj);
+                bool rayIntersection = false;
+                bool preciseSelectionRequired = false;
+                AZ::VectorFloat closestDistance = AZ::VectorFloat(FLT_MAX);
 
-                // If we have a mesh, raycast against it.
-                if (geometry)
+                AzToolsFramework::EditorComponentSelectionRequestsBus::EnumerateHandlersId(m_entityId,
+                    [&hc, &closestDistance, &rayIntersection, &preciseSelectionRequired](
+                        AzToolsFramework::EditorComponentSelectionRequests* handler) -> bool
                 {
-                    const Matrix34 inverseTM = GetWorldTM().GetInverted();
-                    const Vec3 raySrcLocal = inverseTM.TransformPoint(hc.raySrc);
-                    const Vec3 rayDirLocal = inverseTM.TransformVector(hc.rayDir).GetNormalized();
-
-                    SRayHitInfo hi;
-                    hi.inReferencePoint = raySrcLocal;
-                    hi.inRay = Ray(raySrcLocal, rayDirLocal);
-                    if (geometry->RayIntersection(hi))
+                    if (handler->SupportsEditorRayIntersect())
                     {
-                        const Vec3 worldHitPos = GetWorldTM().TransformPoint(hi.vHitPos);
-                        hc.dist = hc.raySrc.GetDistance(worldHitPos);
-                        hc.object = this;
-                        return true;
+                        AZ::VectorFloat distance;
+                        preciseSelectionRequired = true;
+                        rayIntersection |= handler->EditorSelectionIntersectRay(
+                            LYVec3ToAZVec3(hc.raySrc), LYVec3ToAZVec3(hc.rayDir), distance);
+
+                        if (distance < closestDistance)
+                        {
+                            closestDistance = distance;
+                        }
                     }
 
-                    return false;
-                }
-                else
-                {
-                    // Otherwise accept the AABB hit.
-                    hc.dist = (hitPos - hc.raySrc).GetLength();
+                    // iterate over all handlers
                     return true;
+                });
+
+                hc.object = this;
+
+                if (preciseSelectionRequired)
+                {
+                    hc.dist = closestDistance;
+                    return rayIntersection;
                 }
+                    
+                hc.dist = (hitPos - hc.raySrc).GetLength();
+                return true;
+
             }
 
             return false;
@@ -783,17 +829,19 @@ bool CComponentEntityObject::HitTest(HitContext& hc)
 
 void CComponentEntityObject::GetBoundBox(AABB& box)
 {
-    CBaseObject::GetBoundBox(box);
-}
-
-void CComponentEntityObject::GetLocalBounds(AABB& box)
-{
     box.Reset();
 
     if (m_entityId.IsValid())
     {
         AZ::Aabb aabb = AZ::Aabb::CreateNull();
-        EBUS_EVENT_ID_RESULT(aabb, m_entityId, LmbrCentral::MeshComponentRequestBus, GetLocalBounds);
+
+        AzToolsFramework::EditorComponentSelectionRequestsBus::EnumerateHandlersId(m_entityId,
+            [&aabb](AzToolsFramework::EditorComponentSelectionRequests* handler) -> bool
+        {
+            aabb.AddAabb(handler->GetEditorSelectionBounds());
+            return true;
+        });
+
         if (aabb.IsValid())
         {
             box.Add(AZVec3ToLYVec3(aabb.GetMin()));
@@ -801,6 +849,13 @@ void CComponentEntityObject::GetLocalBounds(AABB& box)
             return;
         }
     }
+
+    CBaseObject::GetBoundBox(box);
+}
+
+void CComponentEntityObject::GetLocalBounds(AABB& box)
+{
+    box.Reset();
 
     float r = GetRadius();
     box.min = -Vec3(r, r, r);
@@ -855,23 +910,6 @@ void CComponentEntityObject::Display(DisplayContext& dc)
 
     if (m_entityId.IsValid())
     {
-        // Do geometry debug draw if geometry highlighting is enabled (editor feature).
-        if ((!IsSelected() && m_accentType == AzToolsFramework::EntityAccentType::Hover && GetIEditor()->GetEditorSettings()->viewports.bHighlightMouseOverGeometry) ||
-            (IsSelected() && GetIEditor()->GetEditorSettings()->viewports.bHighlightSelectedGeometry))
-        {
-            SGeometryDebugDrawInfo dd;
-            dd.tm = GetWorldTM();
-            dd.bExtrude = true;
-            dd.color = ColorB(250, 0, 250, 30);
-            dd.lineColor = ColorB(255, 255, 0, 160);
-            IStatObj* geometry = nullptr;
-            EBUS_EVENT_ID_RESULT(geometry, m_entityId, LmbrCentral::LegacyMeshComponentRequestBus, GetStatObj);
-            if (geometry)
-            {
-                geometry->DebugDraw(dd);
-            }
-        }
-
         // Draw link to parent if this or the parent object are selected.
         {
             AZ::EntityId parentId;
@@ -1061,26 +1099,41 @@ void CComponentEntityObject::DrawAccent(DisplayContext& dc)
         }
         case AzToolsFramework::EntityAccentType::ParentSelected:
         {
-            dc.SetColor(1, 0.549, 0); // Orange
+            dc.SetColor(1, 0.549f, 0); // Orange
             break;
         }
         case AzToolsFramework::EntityAccentType::SliceSelected:
         {
-            dc.SetColor(0.117, 0.565, 1); // Blue
+            dc.SetColor(0.117f, 0.565f, 1); // Blue
             break;
         }
         default:
         {
-            dc.SetColor(1, 0.0784, 0.576); // Pink
+            dc.SetColor(1, 0.0784f, 0.576f); // Pink
             break;
         }
     }
 
-    AABB box;
-    GetLocalBounds(box);
-    dc.PushMatrix(GetWorldTM());
-    dc.DrawWireBox(box.min, box.max);
-    dc.PopMatrix();
+    using AzToolsFramework::EditorComponentSelectionRequests;
+    AZ::u32 displayOptions = EditorComponentSelectionRequests::BoundingBoxDisplay::NoBoundingBox;
+
+    AZ::u32 handlers = 0;
+    AzToolsFramework::EditorComponentSelectionRequestsBus::EnumerateHandlersId(m_entityId,
+        [&displayOptions, &handlers](AzToolsFramework::EditorComponentSelectionRequests* handler) -> bool
+    {
+        handlers++;
+        displayOptions |= handler->GetBoundingBoxDisplayType();
+        return true;
+    });
+
+    // if there are no explicit handlers, default to show the aabb when the mouse is over or the entity is selected.
+    // this will be the case with newly added entities without explicit handlers attached (no components).
+    if (handlers == 0 || (displayOptions & EditorComponentSelectionRequests::BoundingBoxDisplay::BoundingBox) != 0)
+    {
+        AABB box;
+        GetBoundBox(box);
+        dc.DrawWireBox(box.min, box.max);
+    }
 }
 
 void CComponentEntityObject::SetMaterial(CMaterial* material)
@@ -1098,6 +1151,8 @@ void CComponentEntityObject::SetMaterial(CMaterial* material)
             EBUS_EVENT_ID(m_entityId, LmbrCentral::MaterialOwnerRequestBus, SetMaterial, nullptr);
         }
     }
+
+    ValidateMeshStatObject();
 }
 
 CMaterial* CComponentEntityObject::GetMaterial() const
@@ -1123,6 +1178,15 @@ CMaterial* CComponentEntityObject::GetRenderMaterial() const
     }
 
     return nullptr;
+}
+
+void CComponentEntityObject::ValidateMeshStatObject()
+{
+    IStatObj* statObj = GetIStatObj();
+    CMaterial* editorMaterial = GetMaterial();
+    CStatObjValidator statValidator;
+    // This will print out warning messages to the console.
+    statValidator.Validate(statObj, editorMaterial, nullptr);
 }
 
 #include <Objects/ComponentEntityObject.moc>

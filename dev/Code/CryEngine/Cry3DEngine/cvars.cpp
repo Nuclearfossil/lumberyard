@@ -90,6 +90,15 @@ void OnVegetationVisibleChange(ICVar* pArgs)
     }
 }
 
+void OnVolumetricFogChanged(ICVar* pArgs)
+{
+    const ICVar* deferredShadingCVar = gEnv->pConsole->GetCVar("r_DeferredShadingTiled");
+    if (deferredShadingCVar->GetIVal() == 0 && pArgs->GetIVal() != 0)
+    {
+        gEnv->pLog->LogWarning("e_VolumetricFog is set to 0 when r_DeferredShadingTiled is 0.");
+        Cry3DEngineBase::GetCVars()->e_VolumetricFog = 0;
+    }
+}
 
 void CVars::Init()
 {
@@ -97,8 +106,8 @@ void CVars::Init()
         "Activates global height/distance based fog");
     DefineConstIntCVar(e_FogVolumes, 1, VF_CHEAT | VF_CHEAT_ALWAYS_CHECK,
         "Activates local height/distance based fog volumes");
-    REGISTER_CVAR(e_VolumetricFog, 0, VF_NULL,
-        "Activates volumetric fog");
+    REGISTER_CVAR_CB(e_VolumetricFog, 0, VF_NULL,
+        "Activates volumetric fog", OnVolumetricFogChanged);
     DefineConstIntCVar(e_FogVolumesTiledInjection, 1, VF_NULL,
         "Activates tiled FogVolume density injection");
     REGISTER_CVAR(e_Entities, 1, VF_CHEAT | VF_CHEAT_ALWAYS_CHECK,
@@ -352,7 +361,7 @@ void CVars::Init()
     DefineConstIntCVar(e_ShadowsLodBiasInvis, 0, VF_NULL,
         "Simplifies mesh for shadow map generation by X LOD levels, if object is not visible in main frame");
 
-    DefineConstIntCVar(e_Tessellation, 1, VF_NULL,
+    REGISTER_CVAR(e_Tessellation, 1, VF_NULL,
         "HW geometry tessellation  0 = not allowed, 1 = allowed");
     REGISTER_CVAR(e_TessellationMaxDistance, 30.f, VF_NULL,
         "Maximum distance from camera in meters to allow tessellation, also affects distance-based displacement fadeout");
@@ -614,7 +623,10 @@ void CVars::Init()
         "Activates drawing of water volumes\n"
         "1: use usual rendering path\n"
         "2: use fast rendering path with merged fog");
-
+    DefineConstIntCVar(e_RenderTransparentUnderWater, e_RenderTransparentUnderWaterDefault, VF_NULL,
+        "Determines how transparent/alphablended objects are rendered in WaterVolume\n"
+        "0: they are not rendered under water (fast performance)\n"
+        "1: they are rendered twice under water and above water (higher quality)");
     if (!OceanToggle::IsActive())
     {
         REGISTER_CVAR(e_WaterTessellationAmount, 200, VF_NULL,  // being deprecated by Water gem
@@ -839,6 +851,8 @@ void CVars::Init()
         "LOD distance ratio for objects");
     REGISTER_CVAR(e_LodFaceAreaTargetSize, 0.005f, VF_NULL,
         "Threshold used for LOD computation.");
+    REGISTER_CVAR(e_FogVolumeShadingQuality, 0, VF_NULL,
+        "Fog Volume Shading Quality 0: standard, 1:high (better fog volume interaction)");
     DefineConstFloatCVar(e_LodCompMaxSize, VF_NULL,
         "Affects LOD selection for big objects, small number will switch more objects into lower LOD");
     REGISTER_CVAR(e_ViewDistRatio, 60.0f, VF_CVARGRP_IGNOREINREALVAL,
@@ -907,7 +921,7 @@ void CVars::Init()
     DefineConstFloatCVar(e_VolObjShadowStrength, VF_NULL,
         "Self shadow intensity of volume objects [0..1].");
 
-    DefineConstIntCVar(e_ScreenShot, 0, VF_NULL,
+    REGISTER_CVAR(e_ScreenShot, 0, VF_NULL,
         "Make screenshot combined up of multiple rendered frames\n"
         "(negative values for multiple frames, positive for a a single frame)\n"
         " 1 highres\n"
@@ -992,7 +1006,7 @@ void CVars::Init()
     REGISTER_CVAR(e_ObjShadowCastSpec, 0, VF_NULL,
         "Object shadow casting spec. Only objects with Shadow Cast Spec <= e_ObjShadowCastSpec will cast shadows");
 
-    REGISTER_CVAR(e_ParticlesPoolSize, 16 << 10, VF_CHEAT | VF_CHEAT_NOCHECK,
+    REGISTER_CVAR(e_ParticlesPoolSize, 16 << 10, VF_REQUIRE_APP_RESTART,
         "Particle system pool memory size in KB");
 
     DefineConstIntCVar(e_ParticlesLights, 1, VF_NULL,
@@ -1065,6 +1079,10 @@ void CVars::Init()
 
     e_ScreenShotFileFormat = REGISTER_STRING("e_ScreenShotFileFormat", "tga",  VF_NULL,
             "Set output image file format for hires screen shots. Can be jpg or tga");
+
+    e_ScreenShotFileName = REGISTER_STRING("e_ScreenShotFileName", "", VF_NULL, 
+        "Sets the output screen shot name, can include relative directories to @user@/ScreenShots");
+
     e_SQTestTextureName = REGISTER_STRING("e_SQTestTextureName", "strfrn_advrt_boards_screen",  VF_NULL,
             "Reference texture name for streaming latency test");
     e_StreamCgfDebugFilter = REGISTER_STRING("e_StreamCgfDebugFilter", "",  VF_NULL,
@@ -1185,8 +1203,4 @@ void CVars::Init()
     REGISTER_CVAR(e_PermanentRenderObjects, 0, VF_NULL, "Creates permanent render objects for each render node");
     REGISTER_CVAR(e_StaticInstancing, 0, VF_NULL, "Enables instancing of static objects");
     REGISTER_CVAR(e_StaticInstancingMinInstNum, 10, VF_NULL, "Minimum number of common static objects in a tree node before hardware instancing is used.");
-
-#if defined(FEATURE_SVO_GI)
-    RegisterTICVars();
-#endif
 }
